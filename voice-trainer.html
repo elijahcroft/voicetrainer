@@ -1,0 +1,2491 @@
+<!--
+  voice-trainer.html — voice masculinization practice with live acoustic feedback.
+
+  Open this file directly in Chrome (File > Open, or drag it in). Nothing is
+  installed, nothing is uploaded, and no audio is recorded or stored — every
+  frame is analysed and discarded. Only your calibration numbers and the scores
+  of each take — four medians and a date — are saved, in this browser's
+  localStorage.
+
+  If the microphone will not start from file://, serve the folder instead:
+      python3 -m http.server
+  then open http://localhost:8000/voice-trainer.html
+
+  The DSP lives in dsp.js and is verified by test-dsp.mjs (node test-dsp.mjs).
+  The statement-endings measurement is verified by test-endings.mjs, which pulls
+  its functions out of this file so the two cannot drift apart.
+  See RESEARCH.md for the studies behind the targets.
+-->
+<meta charset="utf-8">
+<title>Voice Trainer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="dsp.js"></script>
+<style>
+  :root {
+    --bg: #12141a;
+    --panel: #1a1d26;
+    --panel-2: #222634;
+    --line: #2e3446;
+    --text: #e6e9f2;
+    --dim: #8f97ad;
+    --accent: #6ea8ff;
+    --good: #5ad39a;
+    --warn: #f0b45e;
+    --bad: #ef6f6f;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  button {
+    font: inherit; color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 16px; cursor: pointer;
+    transition: border-color .12s, background .12s, filter .12s;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #0d1117; border-color: var(--accent); font-weight: 600; }
+  button.primary:hover:not(:disabled) { filter: brightness(1.1); }
+  button.recording { background: rgba(239,111,111,.14); border-color: var(--bad); color: #ffc9c9; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 20px; border-bottom: 1px solid var(--line);
+    background: rgba(26,29,38,.86); backdrop-filter: blur(10px);
+    position: sticky; top: 0; z-index: 20;
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  .mic-state {
+    font-size: 12.5px; color: var(--dim); display: flex; align-items: center; gap: 7px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 999px; padding: 4px 12px 4px 10px;
+  }
+  .mic-state.live { border-color: rgba(90,211,154,.4); color: #a8e8c9; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #555c70; flex-shrink: 0; }
+  .dot.on { background: var(--good); box-shadow: 0 0 0 0 rgba(90,211,154,.6); animation: pulse 2s ease-out infinite; }
+  @keyframes pulse {
+    70% { box-shadow: 0 0 0 7px rgba(90,211,154,0); }
+    100% { box-shadow: 0 0 0 0 rgba(90,211,154,0); }
+  }
+  .spacer { flex: 1; }
+
+  /* Grid rather than flex so the numbers panel can sit beside the exercise on
+     a wide screen and below it on a phone, where a table above the exercise
+     would push the thing you came to use off the bottom of the fold. */
+  .layout {
+    display: grid; gap: 22px; padding: 22px 20px 48px;
+    grid-template-columns: 250px minmax(0, 1fr);
+    grid-template-areas: "nav main" "numbers main";
+    align-items: start; align-content: start;
+    max-width: 1240px; margin: 0 auto;
+  }
+  nav { grid-area: nav; }
+  aside.numbers { grid-area: numbers; }
+  main { grid-area: main; }
+
+  nav h2, aside.numbers h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--dim); margin: 0 0 8px 4px; }
+  .ex {
+    display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; margin-bottom: 5px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px;
+    position: relative;
+  }
+  .ex.active { border-color: var(--accent); background: var(--panel-2); }
+  .ex.active::before {
+    content: ''; position: absolute; left: -1px; top: 9px; bottom: 9px;
+    width: 3px; border-radius: 3px; background: var(--accent);
+  }
+  .ex .n {
+    flex-shrink: 0; width: 21px; height: 21px; border-radius: 6px; margin-top: 1px;
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--dim);
+    font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .ex.active .n { background: var(--accent); border-color: var(--accent); color: #0d1117; }
+  .ex.done .n { border-color: rgba(90,211,154,.5); color: var(--good); }
+  .ex .t { font-weight: 600; font-size: 13.5px; }
+  .ex .s { font-size: 12px; color: var(--dim); margin-top: 1px; line-height: 1.4; }
+  .locked-note { font-size: 11.5px; color: var(--dim); margin: 6px 0 0 4px; }
+
+  @media (max-width: 860px) {
+    .layout {
+      padding: 16px 14px 40px; gap: 16px;
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "nav" "main" "numbers";
+    }
+    #exList { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; }
+    #exList .ex { width: auto; min-width: 172px; flex-shrink: 0; margin-bottom: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before { animation: none !important; transition: none !important; }
+  }
+
+  main { flex: 1; min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .card h3 { margin: 0 0 5px; font-size: 19px; letter-spacing: -.01em; }
+  .why { color: var(--dim); font-size: 13.5px; margin: 0 0 14px; max-width: 68ch; }
+  .steps { margin: 0 0 4px; padding-left: 21px; max-width: 62ch; }
+  .steps li { margin-bottom: 7px; }
+  .steps li::marker { color: var(--dim); font-variant-numeric: tabular-nums; }
+  /* Diagnosis and caveats read as steps when they sit inside the list, so they
+     live below it instead — you can follow the numbers with your mouth busy. */
+  .note { font-size: 13px; color: var(--dim); margin: 12px 0 0; max-width: 66ch; }
+  .note b { color: var(--text); font-weight: 600; }
+
+  .diagram {
+    margin: 16px 0 0; padding: 14px 16px 12px;
+    background: #0e1016; border: 1px solid var(--line); border-radius: 10px;
+  }
+  .diagram .dwrap { margin: 0 auto; }
+  .diagram svg { display: block; width: 100%; height: auto; overflow: visible; }
+  /* The rule spans the whole figure; the text inside it stops at a readable
+     measure, which is why the caption is a block wrapping an inner span. */
+  .diagram figcaption {
+    font-size: 12.5px; color: var(--dim); line-height: 1.5;
+    margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--line);
+  }
+  .diagram figcaption span { display: block; max-width: 70ch; }
+
+  canvas { width: 100%; display: block; border-radius: 9px; background: #0e1016; }
+
+  .meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 14px; }
+  .meter { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; transition: border-color .15s; }
+  .meter .lab { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--dim); }
+  .meter .val { font-family: var(--mono); font-size: 25px; font-weight: 600; margin: 3px 0 2px; font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .meter .sub { font-size: 12px; color: var(--dim); min-height: 17px; }
+  .meter.muted { opacity: .38; }
+  .meter.hit { border-color: rgba(90,211,154,.45); }
+  .meter.hit .val { color: var(--good); }
+  .meter.idle .val { color: var(--dim); }
+
+  .bar { height: 6px; background: #0e1016; border-radius: 4px; margin-top: 9px; position: relative; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width .09s linear, background .15s; }
+  .meter.hit .bar > i { background: var(--good); }
+  .bar > u { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); border-radius: 2px; }
+
+  .banner { padding: 11px 15px; border-radius: 9px; font-size: 13.5px; margin-bottom: 16px; border: 1px solid; }
+  .banner.compact { padding: 9px 14px; font-size: 12.5px; display: flex; gap: 9px; align-items: flex-start; }
+  .banner.compact b { font-weight: 650; }
+  /* display:flex above would otherwise beat the UA rule for [hidden]. */
+  .banner[hidden] { display: none; }
+  .banner.safety { background: rgba(240,180,94,.09); border-color: rgba(240,180,94,.35); color: #f3cd94; }
+  .banner.info { background: rgba(110,168,255,.09); border-color: rgba(110,168,255,.35); color: #b8d3ff; }
+  .banner.err { background: rgba(239,111,111,.1); border-color: rgba(239,111,111,.4); color: #ffb3b3; }
+
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+  .passage { background: #0e1016; border-radius: 9px; padding: 15px 17px; font-size: 16.5px; line-height: 1.75; border: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 6px; }
+  td, th { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--dim); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ok { color: var(--good); } .no { color: var(--warn); }
+  .hint { font-size: 12.5px; color: var(--dim); margin-top: 10px; }
+
+  /* Statement endings. Prompt, contour and verdict are one bordered stack on
+     purpose: you read the sentence, look down two centimetres, and see what the
+     ending did. Spreading them across separate cards put the feedback far
+     enough from the prompt that you had to hunt for it. */
+  .stack { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #0e1016; }
+  .stack .prompt { padding: 13px 17px 15px; border-bottom: 1px solid var(--line); }
+  .stack .prompt .cnt { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--dim); }
+  .stack .prompt .say { font-size: 20px; line-height: 1.4; margin-top: 3px; }
+  .stack canvas { display: block; width: 100%; height: 188px; }
+  /* A trace that is not inside a stack still needs its own edge, now that it
+     shares a card with the text above it. */
+  .trace { display: block; width: 100%; height: 200px; background: #0e1016;
+           border: 1px solid var(--line); border-radius: 10px; }
+  .verdict { display: flex; gap: 11px; align-items: baseline; flex-wrap: wrap;
+             padding: 11px 17px; background: var(--panel-2); border-top: 1px solid var(--line); }
+  .verdict .v { font-family: var(--mono); font-size: 18px; font-weight: 600; color: var(--dim); }
+  .verdict .d { font-size: 12.5px; color: var(--dim); }
+  .verdict.good .v { color: var(--good); }
+  .verdict.warn .v { color: var(--warn); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+  .chip { width: 27px; height: 27px; border-radius: 7px; display: grid; place-items: center;
+          font-size: 14px; background: var(--panel-2); border: 1px solid var(--line); color: var(--dim); }
+  .chip.fall { color: var(--good); border-color: rgba(90,211,154,.45); }
+  .chip.rise { color: var(--warn); border-color: rgba(240,180,94,.45); }
+  .chips .cnt { font-size: 12.5px; color: var(--dim); margin-left: 4px; }
+
+  /* The explanation matters once, and is in the way every session after that. */
+  .explain { margin: 0 0 14px; }
+  .explain > summary { cursor: pointer; color: var(--dim); font-size: 13px; list-style: none;
+                       display: inline-flex; gap: 6px; align-items: center; }
+  .explain > summary::-webkit-details-marker { display: none; }
+  .explain > summary::before { content: "▸"; font-size: 11px; }
+  .explain[open] > summary::before { content: "▾"; }
+  .explain > summary:hover { color: var(--text); }
+  .explain > div { padding-top: 12px; }
+  code { font-family: var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: .92em; }
+</style>
+
+<header>
+  <h1>Voice Trainer</h1>
+  <div class="mic-state" id="micState" aria-live="polite"><span class="dot" id="dot"></span><span id="micLabel">microphone off</span></div>
+  <div class="spacer"></div>
+  <button id="micBtn" class="primary">Start microphone</button>
+  <button id="resetBtn" title="Clear saved calibration and take history">Reset calibration</button>
+</header>
+
+<div class="layout">
+  <nav aria-label="Practice exercises">
+    <h2>Practice</h2>
+    <div id="exList"></div>
+  </nav>
+
+  <aside class="numbers">
+    <h2>Your numbers</h2>
+    <div class="card" style="padding:13px 15px;margin:0">
+      <table id="baseTable"><tbody></tbody></table>
+    </div>
+  </aside>
+
+  <main>
+    <div class="banner safety compact">
+      <span aria-hidden="true">⚠</span>
+      <span><b>Stop if you feel throat tightness, pain, or hoarseness.</b> Forcing pitch downward is the
+      main way voice practice causes injury — resonance and weight do more for how masculine a voice
+      reads than pitch does, and they cost your voice nothing.</span>
+    </div>
+    <div id="errBox"></div>
+    <div id="pane"></div>
+  </main>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ==========================================================================
+  // constants grounded in the literature (see RESEARCH.md)
+  // ==========================================================================
+
+  var MASC_F0_CEILING = 130;   // below this, listeners reliably hear "male"
+  var ANDROGYNOUS_LOW = 140;   // 140-165 Hz is the ambiguous zone where
+  var ANDROGYNOUS_HIGH = 165;  // gender recognition accuracy collapses
+  var FLOOR_MARGIN_ST = 3;     // never target within 3 semitones of the bottom
+  var RESONANCE_GOAL = 1.10;   // cis male vocal tracts run 10-20% longer
+
+  // Phrase-final contour, used only by the statement-endings drill. A phrase is
+  // whatever sits between two long silences; inside it, the final syllable is
+  // found from the loudness envelope and the verdict is read from that syllable
+  // alone. The thresholds are judgement calls, not measured cut-points — see
+  // RESEARCH.md §5.
+  var PHRASE_GAP_MS = 260;     // silence that ends a phrase
+  var MIN_PHRASE_MS = 400;     // shorter than this is a cough, not a sentence
+  var FINAL_SCAN_MS = 700;     // how far back to look for the final syllable
+  var SYLLABLE_DIP = 0.5;      // loudness dip, relative to the nucleus, that marks its start
+  var CONTOUR_MIN_MS = 250;    // a shorter syllable is padded backwards to read its shape
+  var TERMINAL_ST = 1.0;       // smaller than this in either direction is "flat"
+  var HOLD_LONG_MS = 350;      // final syllable longer than this reads stretched
+
+  // How much *voiced* speech a measurement needs, in milliseconds. These were
+  // frame counts, which made them depend on the display: 120 frames is two
+  // seconds on a 60 Hz screen and one on a 120 Hz one, and far longer if the
+  // browser throttles requestAnimationFrame. Time is the quantity that was
+  // always meant.
+  var MIN_VOICED_MS_CALIBRATE = 5000;
+  var MIN_VOICED_MS_SCORE = 2000;
+  var MIN_FRAMES_FOR_MEDIAN = 20;   // frames, correctly: enough samples to median
+
+  var STORE_KEY = 'voice-trainer-baseline-v1';
+  var HISTORY_KEY = 'voice-trainer-history-v1';
+  var MAX_TAKES = 300;         // ~a year of daily practice; oldest are dropped
+
+  // ==========================================================================
+  // audio
+  // ==========================================================================
+
+  var audio = { ctx: null, analyser: null, stream: null, buf: null, running: false };
+  var latest = null;               // most recent analysed frame
+  var smoothF0 = new DSP.MedianSmoother(5);
+  var smoothRes = new DSP.MedianSmoother(31);   // resonance is noisy; ~0.5 s
+  var smoothWeight = new DSP.MedianSmoother(31);
+  var intonation = new DSP.RollingStats(10000);
+
+  // Frames of continuous silence before the smoothers are cleared. A held vowel
+  // drops the odd frame, so clearing on the first unvoiced one would throw away
+  // the median mid-note; leaving them forever is worse — the resonance and
+  // weight meters would keep displaying a number long after you stopped making
+  // any sound, which is the one thing a biofeedback readout must never do.
+  var SILENCE_FRAMES_TO_CLEAR = 12;   // ~200 ms
+  var unvoicedRun = 0;
+
+  function resetSmoothers() {
+    smoothF0.reset(); smoothRes.reset(); smoothWeight.reset();
+    unvoicedRun = 0;
+  }
+
+  function setMicUI(on, label) {
+    document.getElementById('dot').className = 'dot' + (on ? ' on' : '');
+    document.getElementById('micLabel').textContent = label;
+    document.getElementById('micState').classList.toggle('live', on);
+    document.getElementById('micBtn').textContent = on ? 'Stop microphone' : 'Start microphone';
+    syncMicControls();
+  }
+
+  // Exercise controls that cannot do anything without audio say so, rather than
+  // looking available and then throwing an error banner when pressed. Called on
+  // every mic change and after each exercise rebuilds its pane.
+  function syncMicControls() {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-needs-mic]'), function (b) {
+      b.disabled = !audio.running;
+      b.title = audio.running ? '' : 'Start the microphone first';
+    });
+    var hint = document.getElementById('micHint');
+    if (hint) hint.hidden = audio.running;
+  }
+
+  function showError(msg) {
+    document.getElementById('errBox').innerHTML =
+      '<div class="banner err">' + msg + '</div>';
+  }
+  function clearError() { document.getElementById('errBox').innerHTML = ''; }
+
+  async function startMic() {
+    clearError();
+    try {
+      // These three "helpful" features all corrupt acoustic measurement:
+      // AGC rescales level, noise suppression eats the spectrum, echo
+      // cancellation filters the signal.
+      audio.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      });
+    } catch (e) {
+      showError('Could not open the microphone (' + e.name + '). Grant permission, or if you opened ' +
+        'this as a file, run <code>python3 -m http.server</code> in this folder and use ' +
+        '<code>http://localhost:8000/voice-trainer.html</code> instead.');
+      return;
+    }
+    audio.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.ctx.state === 'suspended') await audio.ctx.resume();
+    var src = audio.ctx.createMediaStreamSource(audio.stream);
+    audio.analyser = audio.ctx.createAnalyser();
+    audio.analyser.fftSize = 4096;
+    src.connect(audio.analyser);
+    audio.buf = new Float32Array(audio.analyser.fftSize);
+    audio.running = true;
+    setMicUI(true, Math.round(audio.ctx.sampleRate / 1000) + ' kHz, listening');
+    requestAnimationFrame(loop);
+  }
+
+  function stopMic() {
+    audio.running = false;
+    if (audio.stream) audio.stream.getTracks().forEach(function (t) { t.stop(); });
+    if (audio.ctx) audio.ctx.close();
+    audio.ctx = audio.analyser = audio.stream = null;
+    latest = null;
+    resetSmoothers();
+    // A take cannot continue without audio. Ending it here stops the exercise
+    // sitting there labelled "recording" while nothing is being measured.
+    if (current && current.abort) current.abort();
+    setMicUI(false, 'microphone off');
+  }
+
+  function loop(ts) {
+    if (!audio.running) return;
+    audio.analyser.getFloatTimeDomainData(audio.buf);
+    var a = DSP.analyze(audio.buf, audio.ctx.sampleRate);
+    latest = a;
+
+    if (a.voiced) {
+      unvoicedRun = 0;
+      smoothF0.push(a.f0);
+      intonation.push(DSP.hzToSemitones(a.f0), ts);
+      if (a.resonance != null) smoothRes.push(a.resonance);
+      if (a.weightRaw != null) smoothWeight.push(a.weightRaw);
+    } else {
+      smoothF0.reset();
+      if (++unvoicedRun >= SILENCE_FRAMES_TO_CLEAR) { smoothRes.reset(); smoothWeight.reset(); }
+    }
+
+    if (current && current.frame) current.frame(a, ts);
+    requestAnimationFrame(loop);
+  }
+
+  // ==========================================================================
+  // saved calibration
+  // ==========================================================================
+
+  var base = load();
+  function load() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function save() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(base)); } catch (e) {}
+    renderBaseTable();
+    renderExList();
+  }
+
+  // ==========================================================================
+  // saved takes
+  //
+  // The scored numbers were computed and then thrown away, which meant the one
+  // question practice actually asks — "is this moving?" — could not be
+  // answered. Only the four medians and a timestamp are kept; no audio and no
+  // per-frame data ever leaves the analysis loop.
+  // ==========================================================================
+
+  var history = loadHistory();
+  function loadHistory() {
+    try {
+      var h = JSON.parse(localStorage.getItem(HISTORY_KEY));
+      return Array.isArray(h) ? h : [];
+    } catch (e) { return []; }
+  }
+
+  // `kind` is 'calibration' | 'passage' | 'free'. The first two are the same
+  // text, so their resonance is comparable; free speech is a different text and
+  // is excluded from the resonance chart on purpose.
+  function recordTake(kind, m) {
+    history.push({
+      t: Date.now(),
+      kind: kind,
+      f0: m.f0 != null ? +m.f0.toFixed(1) : null,
+      res: m.res != null ? +m.res.toFixed(2) : null,
+      weight: m.weight != null ? +m.weight.toFixed(2) : null,
+      sd: m.sd != null ? +m.sd.toFixed(2) : null
+    });
+    if (history.length > MAX_TAKES) history = history.slice(-MAX_TAKES);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch (e) {}
+    renderExList();
+  }
+
+  function clearHistory() {
+    history = [];
+    try { localStorage.removeItem(HISTORY_KEY); } catch (e) {}
+    renderExList();
+  }
+
+  // The pitch target, derived rather than assumed. It moves toward the
+  // masculine range but is never allowed within FLOOR_MARGIN_ST of the lowest
+  // pitch that was actually measured as comfortable.
+  // One stage lower than where you speak now, heading toward the masculine
+  // range, but never below a safe margin above your measured floor — and never
+  // ABOVE where you already speak, which would be telling you to raise your
+  // pitch. A narrow measured range legitimately means "no pitch work right
+  // now", and the tool says so rather than inventing a target.
+  function pitchTarget() {
+    if (base.habitualF0 == null) return null;
+    var stepDown = DSP.semitonesToHz(DSP.hzToSemitones(base.habitualF0) - 2);
+    var wanted = Math.min(stepDown, MASC_F0_CEILING);
+    var limited = false;
+
+    if (base.safeFloor != null) {
+      var safest = DSP.semitonesToHz(DSP.hzToSemitones(base.safeFloor) + FLOOR_MARGIN_ST);
+      if (wanted < safest) { wanted = safest; limited = true; }
+    }
+    if (wanted >= base.habitualF0) {
+      // No headroom at all between the floor and habitual speech.
+      return { hz: base.habitualF0, limited: true, noHeadroom: true };
+    }
+    return { hz: wanted, limited: limited, noHeadroom: false };
+  }
+
+  function targetBand() {
+    var t = pitchTarget();
+    if (!t) return null;
+    return { lo: t.hz * 0.94, hi: t.hz * 1.06, center: t.hz, limited: t.limited };
+  }
+
+  function renderBaseTable() {
+    var rows = [];
+    function row(label, value, note) {
+      rows.push('<tr><td>' + label + '</td><td class="num">' + value +
+        '</td></tr>' + (note ? '<tr><td colspan="2" style="color:var(--dim);font-size:12px;border:0;padding-top:0">' + note + '</td></tr>' : ''));
+    }
+    if (base.habitualF0 == null) {
+      rows.push('<tr><td colspan="2" style="color:var(--dim)">Run <b>Calibrate</b> first — every target below is derived from your own voice.</td></tr>');
+    } else {
+      row('Habitual pitch', base.habitualF0.toFixed(0) + ' Hz');
+      if (base.safeFloor != null) row('Comfortable floor', base.safeFloor.toFixed(0) + ' Hz');
+      var t = pitchTarget();
+      if (t) {
+        row('Pitch target', t.hz.toFixed(0) + ' Hz',
+          t.limited ? 'Held above your floor on purpose — pushing lower is where injuries come from.' : null);
+      }
+      if (base.resonance != null) {
+        row('Resonance baseline', base.resonance.toFixed(1) + ' cm');
+        row('Resonance goal', (base.resonance * RESONANCE_GOAL).toFixed(1) + ' cm');
+      }
+      if (base.intonationSd != null) row('Intonation', base.intonationSd.toFixed(1) + ' st');
+    }
+    document.querySelector('#baseTable tbody').innerHTML = rows.join('');
+  }
+
+  // ==========================================================================
+  // shared UI pieces
+  // ==========================================================================
+
+  // `bar` adds a progress strip under the value. `markAt` (0-1) draws the
+  // target notch on it.
+  function meter(id, label, sub, bar) {
+    return '<div class="meter idle" id="' + id + '"><div class="lab">' + label +
+      '</div><div class="val" id="' + id + '-v">--</div><div class="sub" id="' + id + '-s">' +
+      (sub || '') + '</div>' +
+      (bar ? '<div class="bar"><i id="' + id + '-b"></i><u id="' + id + '-m" hidden></u></div>' : '') +
+      '</div>';
+  }
+  function setMeter(id, value, sub, opts) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    document.getElementById(id + '-v').textContent = value;
+    if (sub != null) document.getElementById(id + '-s').innerHTML = sub;
+    if (opts && opts.hit != null) el.classList.toggle('hit', !!opts.hit);
+    if (opts && opts.muted != null) el.classList.toggle('muted', !!opts.muted);
+    el.classList.toggle('idle', value === '--' || value === '—');
+
+    var bar = document.getElementById(id + '-b');
+    if (bar && opts && opts.fill != null) {
+      bar.style.width = Math.max(0, Math.min(1, opts.fill)) * 100 + '%';
+    }
+    var mark = document.getElementById(id + '-m');
+    if (mark && opts && opts.markAt != null) {
+      mark.hidden = false;
+      mark.style.left = Math.max(0, Math.min(1, opts.markAt)) * 100 + '%';
+    }
+  }
+
+  // Position of `hz` on the meter bar, on the same scale as the ribbon so the
+  // bar and the trace agree.
+  function pitchFill(hz) {
+    if (!hz) return 0;
+    var r = ribbonRange();
+    return (Math.log2(hz) - Math.log2(r.lo)) / (Math.log2(r.hi) - Math.log2(r.lo));
+  }
+
+  // Scrolling pitch ribbon with the target band shaded.
+  function Ribbon(canvas, opts) {
+    this.c = canvas;
+    this.g = canvas.getContext('2d');
+    this.pts = [];
+    this.opts = opts || {};
+    var r = ribbonRange();
+    this.loHz = r.lo; this.hiHz = r.hi;
+  }
+
+  // A fixed 60-320 Hz scale wastes most of the canvas: a voice working between
+  // 130 and 160 Hz draws inside a tenth of the height, where the differences
+  // that matter are invisible. Fit the scale to the range this speaker actually
+  // uses, while always keeping the reference lines and the target in view.
+  function ribbonRange() {
+    var t = pitchTarget();
+    // Everything that has to stay on screen: the floor, the target, the
+    // reference lines, and where this speaker actually talks.
+    var lo = Math.min(base.safeFloor != null ? base.safeFloor : 110,
+                      t ? t.hz : MASC_F0_CEILING, MASC_F0_CEILING);
+    var hi = Math.max(base.habitualF0 != null ? base.habitualF0 : 200, ANDROGYNOUS_HIGH);
+    // Generous headroom below, since a glide can go under the measured floor.
+    return { lo: Math.max(55, lo * 0.8), hi: Math.min(400, hi * 1.12) };
+  }
+  Ribbon.prototype.resize = function () {
+    var r = this.c.getBoundingClientRect();
+    var dpr = window.devicePixelRatio || 1;
+    this.c.width = Math.max(1, r.width * dpr);
+    this.c.height = Math.max(1, r.height * dpr);
+    this.g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.w = r.width; this.h = r.height;
+  };
+  Ribbon.prototype.y = function (hz) {
+    var t = (Math.log2(hz) - Math.log2(this.loHz)) / (Math.log2(this.hiHz) - Math.log2(this.loHz));
+    return this.h - t * this.h;
+  };
+  Ribbon.prototype.push = function (hz) {
+    this.pts.push(hz || 0);
+    var max = Math.floor(this.w / 2);
+    while (this.pts.length > max) this.pts.shift();
+  };
+  Ribbon.prototype.draw = function (band) {
+    var g = this.g;
+    var rect = this.c.getBoundingClientRect();
+    if (!this.w || Math.abs(rect.width - this.w) > 1) this.resize();
+    g.clearRect(0, 0, this.w, this.h);
+    g.fillStyle = '#0e1016';
+    g.fillRect(0, 0, this.w, this.h);
+
+    // reference lines at the boundaries listeners actually respond to
+    var refs = [
+      { hz: MASC_F0_CEILING, label: '130 Hz  reads male', col: 'rgba(90,211,154,.5)' },
+      { hz: ANDROGYNOUS_LOW, label: '140', col: 'rgba(143,151,173,.25)' },
+      { hz: ANDROGYNOUS_HIGH, label: '165  ambiguous zone', col: 'rgba(143,151,173,.25)' }
+    ];
+    refs.forEach(function (r) {
+      var y = this.y(r.hz);
+      g.strokeStyle = r.col; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(0, y); g.lineTo(this.w, y); g.stroke();
+      g.fillStyle = 'rgba(143,151,173,.65)'; g.font = '11px system-ui';
+      g.fillText(r.label, 6, y - 4);
+    }, this);
+
+    if (band) {
+      var yTop = this.y(band.hi), yBot = this.y(band.lo);
+      g.fillStyle = 'rgba(110,168,255,.13)';
+      g.fillRect(0, yTop, this.w, yBot - yTop);
+      g.strokeStyle = 'rgba(110,168,255,.5)';
+      g.setLineDash([4, 4]);
+      g.beginPath(); g.moveTo(0, this.y(band.center)); g.lineTo(this.w, this.y(band.center)); g.stroke();
+      g.setLineDash([]);
+      // Right-aligned: the reference labels are drawn on the left and the
+      // target line often sits within a few pixels of one of them.
+      g.fillStyle = 'rgba(184,211,255,.9)'; g.font = '11px system-ui';
+      g.textAlign = 'right';
+      g.fillText('target ' + band.center.toFixed(0) + ' Hz', this.w - 6, yTop - 5);
+      g.textAlign = 'left';
+    }
+
+    // trace
+    g.lineWidth = 2.2;
+    g.strokeStyle = '#6ea8ff';
+    var drawing = false;
+    for (var i = 0; i < this.pts.length; i++) {
+      var hz = this.pts[i];
+      if (!hz) { if (drawing) { g.stroke(); drawing = false; } continue; }
+      var x = i * 2, y = this.y(Math.min(this.hiHz, Math.max(this.loHz, hz)));
+      if (band) g.strokeStyle = (hz >= band.lo && hz <= band.hi) ? '#5ad39a' : '#6ea8ff';
+      if (!drawing) { g.beginPath(); g.moveTo(x, y); drawing = true; }
+      else g.lineTo(x, y);
+    }
+    if (drawing) g.stroke();
+  };
+
+  // One sentence at a time, drawn whole.
+  //
+  // The scrolling ribbon is the wrong instrument for a contour: it reads two
+  // pixels per frame, so a sentence arrives as a stream of disconnected
+  // fragments that has already slid halfway off the canvas by the time you
+  // could look at it, and its hertz scale flattens a three-semitone rise into a
+  // few pixels. This draws one phrase across the full width, on a semitone
+  // scale centred on that phrase's own average, and holds it on screen after
+  // you stop speaking so there is something to actually look at.
+  function Contour(canvas) {
+    this.c = canvas;
+    this.g = canvas.getContext('2d');
+  }
+  Contour.prototype.resize = Ribbon.prototype.resize;
+
+  // Isolated frames where the pitch tracker slips an octave are what made the
+  // trace look ragged; a median over a short window removes them without
+  // rounding off a real contour, which lasts tenths of a second.
+  //
+  // The window is milliseconds and not a number of frames, for the same reason
+  // the voiced-time minimums are: a 5-frame median is 40 ms on a 120 Hz screen
+  // and 165 ms on a throttled one. At the wide end it erased the very dip
+  // between syllables that the final-syllable search looks for, so the drill
+  // read the whole end of the sentence as one syllable and called rises flat.
+  function medianFilter(pts, pick, halfMs) {
+    return pts.map(function (p, i) {
+      var v = pick(p);
+      if (v == null) return null;
+      var w = [], j;
+      for (j = i; j >= 0 && p.t - pts[j].t <= halfMs; j--) { if (pick(pts[j]) != null) w.push(pick(pts[j])); }
+      for (j = i + 1; j < pts.length && pts[j].t - p.t <= halfMs; j++) { if (pick(pts[j]) != null) w.push(pick(pts[j])); }
+      return w.length ? median(w) : v;
+    });
+  }
+  var SMOOTH_HALF_MS = 25;   // ±25 ms: two frames either side at 60 Hz
+
+  // `pts` are the frames of one phrase ({ t, st, rms }, st null when unvoiced);
+  // `mark` is the scored final syllable, or null while the phrase is still
+  // being spoken.
+  Contour.prototype.draw = function (pts, mark, spanMs) {
+    var g = this.g, i;
+    var rect = this.c.getBoundingClientRect();
+    if (!this.w || Math.abs(rect.width - this.w) > 1) this.resize();
+    var w = this.w, h = this.h, PAD = 30;
+    g.clearRect(0, 0, w, h);
+    g.fillStyle = '#0e1016';
+    g.fillRect(0, 0, w, h);
+    g.font = '11px system-ui';
+
+    var voiced = pts ? pts.filter(function (p) { return p.st != null; }) : [];
+    var SPAN = 6;  // semitones shown above and below the sentence's own average
+    var mid = voiced.length ? median(voiced.map(function (p) { return p.st; })) : 0;
+    var t0 = pts && pts.length ? pts[0].t : 0;
+    var dur = Math.max(spanMs || 0, pts && pts.length ? pts[pts.length - 1].t - t0 : 0, 1200);
+    function x(t) { return PAD + (t - t0) / dur * (w - PAD - 8); }
+    function y(st) { return h / 2 - Math.max(-SPAN, Math.min(SPAN, st - mid)) / SPAN * (h / 2 - 14); }
+
+    // Grid in semitones relative to this sentence, because the question is the
+    // shape of the ending, not where the voice sits — pitch has its own drills.
+    [4, 2, 0, -2, -4].forEach(function (st) {
+      var yy = y(mid + st);
+      g.strokeStyle = st === 0 ? 'rgba(143,151,173,.34)' : 'rgba(143,151,173,.13)';
+      g.beginPath(); g.moveTo(PAD, yy); g.lineTo(w - 8, yy); g.stroke();
+      g.fillStyle = 'rgba(143,151,173,.65)';
+      g.textAlign = 'right';
+      g.fillText(st === 0 ? 'avg' : (st > 0 ? '+' + st : st), PAD - 6, yy + 3.5);
+    });
+    g.textAlign = 'left';
+
+    if (!voiced.length) {
+      g.fillStyle = 'rgba(143,151,173,.6)';
+      g.fillText(mark === false ? 'listening — read the sentence above, then pause'
+                                : 'press Start take, then read the sentence above', PAD + 4, h / 2 - 10);
+      return;
+    }
+
+    // The final syllable, shaded, so the verdict is visibly about one part of
+    // the sentence rather than the whole thing.
+    if (mark) {
+      var x0 = x(mark.from), x1 = x(mark.to);
+      g.fillStyle = mark.dir === 'rise' ? 'rgba(240,180,94,.13)' : 'rgba(90,211,154,.13)';
+      g.fillRect(x0, 8, Math.max(2, x1 - x0), h - 16);
+      g.fillStyle = mark.dir === 'rise' ? 'rgba(240,180,94,.85)' : 'rgba(90,211,154,.85)';
+      g.textAlign = 'center';
+      g.fillText('last syllable', (x0 + x1) / 2, h - 6);
+      g.textAlign = 'left';
+    }
+
+    var st = medianFilter(pts, function (p) { return p.st; }, SMOOTH_HALF_MS);
+    // Break the line only at a real pause. Every stop consonant devoices for a
+    // few frames, and breaking there was most of what made this look choppy.
+    var drawing = false, prevCol = null, prev = null;
+    g.lineWidth = 2.4;
+    g.lineJoin = 'round';
+    for (i = 0; i < pts.length; i++) {
+      if (st[i] == null) continue;
+      var inMark = mark && pts[i].t >= mark.from && pts[i].t <= mark.to;
+      var col = !mark ? '#6ea8ff'
+        : inMark ? (mark.dir === 'rise' ? '#f0b45e' : '#5ad39a')
+        : 'rgba(110,168,255,.45)';
+      var here = { x: x(pts[i].t), y: y(st[i]) };
+      var brk = prev == null || pts[i].t - prev.t > 120;
+      if (drawing && (brk || col !== prevCol)) { g.stroke(); drawing = false; }
+      if (!drawing) {
+        g.strokeStyle = col;
+        g.beginPath();
+        // Rejoin from the previous point unless the gap was a real pause, so a
+        // colour change part-way along does not leave a hole in the line.
+        g.moveTo(brk ? here.x : prev.x, brk ? here.y : prev.y);
+        drawing = true;
+        prevCol = col;
+      }
+      g.lineTo(here.x, here.y);
+      prev = { x: here.x, y: here.y, t: pts[i].t };
+    }
+    if (drawing) g.stroke();
+  };
+
+  // ==========================================================================
+  // diagrams
+  //
+  // Every mechanism this tool asks you to feel — back-pressure, larynx height,
+  // fold thickness — is spatial, and spatial things described only in prose
+  // sound harder than they are. These are schematic on purpose: enough shape to
+  // locate the sensation in your own throat, not enough to be an anatomy plate.
+  // Each carries an aria-label saying the same thing in words, because the
+  // diagram is an explanation and not decoration.
+  // ==========================================================================
+
+  // An SVG with width:100% will happily scale to a 1200px card and blow the
+  // labels up to headline size, so each figure is capped at the width its
+  // viewBox was drawn for — read off the viewBox rather than repeated by hand.
+  function figure(svg, caption) {
+    var vb = /viewBox="0 0 ([\d.]+)/.exec(svg);
+    var cap = vb ? ' style="max-width:' + vb[1] + 'px"' : '';
+    return '<figure class="diagram"><div class="dwrap"' + cap + '>' + svg + '</div>' +
+      (caption ? '<figcaption><span>' + caption + '</span></figcaption>' : '') + '</figure>';
+  }
+
+  // Arrowhead markers are defined per-diagram with a unique id: only one
+  // exercise is ever mounted at a time, but ids leaking between panes would
+  // fail silently and look like a rendering bug.
+  function arrowDef(id, color) {
+    return '<defs><marker id="' + id + '" viewBox="0 0 8 8" refX="7" refY="4" ' +
+      'markerWidth="5" markerHeight="5" orient="auto">' +
+      '<path d="M0 0 L8 4 L0 8 Z" fill="' + color + '"/></marker></defs>';
+  }
+
+  var DIAGRAMS = {};
+
+  DIAGRAMS.straw = function () {
+    return figure(
+      '<svg viewBox="0 0 520 148" role="img" aria-label="Cross-section of the vocal tract with a ' +
+        'straw at the lips. Air backs up inside the tract and presses down on the vocal folds, so ' +
+        'they meet more gently.">' +
+      arrowDef('ar-straw', 'var(--good)') +
+      '<rect x="72" y="34" width="286" height="72" fill="rgba(110,168,255,.10)"/>' +
+      '<rect x="358" y="59" width="112" height="22" fill="rgba(110,168,255,.10)"/>' +
+      '<path d="M72 34 H358 L358 59 H470" fill="none" stroke="var(--line)" stroke-width="2"/>' +
+      '<path d="M72 106 H358 L358 81 H470" fill="none" stroke="var(--line)" stroke-width="2"/>' +
+      // vocal folds, seen edge-on, with the glottal gap between them
+      '<path d="M50 26 L78 62 L50 68 Z" fill="var(--accent)"/>' +
+      '<path d="M50 114 L78 78 L50 72 Z" fill="var(--accent)"/>' +
+      '<line x1="330" y1="70" x2="112" y2="70" stroke="var(--good)" stroke-width="2" ' +
+        'marker-end="url(#ar-straw)"/>' +
+      '<text x="222" y="60" fill="var(--good)" font-size="11.5" text-anchor="middle">back-pressure</text>' +
+      '<text x="66" y="132" fill="var(--dim)" font-size="11.5" text-anchor="middle">vocal folds</text>' +
+      '<text x="215" y="132" fill="var(--dim)" font-size="11.5" text-anchor="middle">vocal tract</text>' +
+      '<text x="414" y="132" fill="var(--dim)" font-size="11.5" text-anchor="middle">straw</text>' +
+      '</svg>',
+      'The narrow opening traps air in the tract. That trapped air pushes back down on the folds, ' +
+      'so they meet with less force for the same loudness — which is why this is the safe way to warm up.');
+  };
+
+  DIAGRAMS.larynx = function () {
+    // Two throats side by side. The only difference is where the larynx sits;
+    // the shaded column above it is the space that shapes the sound.
+    function throat(x, laryY, label, sub, hi) {
+      var col = hi ? 'var(--good)' : 'var(--dim)';
+      return '<g transform="translate(' + x + ',0)">' +
+        '<rect x="34" y="26" width="62" height="' + (laryY - 26) + '" ' +
+          'fill="' + (hi ? 'rgba(90,211,154,.18)' : 'rgba(143,151,173,.22)') + '"/>' +
+        '<path d="M34 26 V128 M96 26 V128" fill="none" stroke="var(--line)" stroke-width="2"/>' +
+        '<line x1="34" y1="26" x2="96" y2="26" stroke="var(--line)" stroke-width="2"/>' +
+        '<rect x="28" y="' + laryY + '" width="74" height="15" rx="4" fill="var(--panel-2)" ' +
+          'stroke="' + col + '" stroke-width="1.5"/>' +
+        '<line x1="118" y1="28" x2="118" y2="' + (laryY - 2) + '" stroke="' + col + '" ' +
+          'stroke-width="1.5" marker-start="url(#ar-lx)" marker-end="url(#ar-lx)"/>' +
+        '<text x="10" y="22" fill="var(--dim)" font-size="11">lips</text>' +
+        '<text x="65" y="' + (laryY + 11) + '" fill="' + col + '" font-size="10.5" ' +
+          'text-anchor="middle">larynx</text>' +
+        '<text x="65" y="148" fill="' + col + '" font-size="12" font-weight="600" ' +
+          'text-anchor="middle">' + label + '</text>' +
+        '<text x="65" y="164" fill="var(--dim)" font-size="11" text-anchor="middle">' + sub + '</text>' +
+        '</g>';
+    }
+    return figure(
+      '<svg viewBox="0 0 400 176" role="img" aria-label="Two throats compared. With the larynx ' +
+        'raised the space above it is short and the voice sounds smaller; with the larynx lowered ' +
+        'that space is longer and the voice sounds larger.">' +
+      arrowDef('ar-lx', 'var(--dim)') +
+      throat(20, 62, 'raised', 'shorter space', false) +
+      throat(220, 104, 'lowered', 'longer space', true) +
+      '</svg>',
+      'Nothing about the pitch has to change between these two. The shaded column is what the ' +
+      'resonance number measures — a yawn lengthens it, and the sigh keeps it long while you make sound.');
+  };
+
+  DIAGRAMS.ng = function () {
+    // The failure mode is invisible from inside your own head, so it gets equal
+    // billing with the success case rather than a footnote.
+    function panel(x, resPath, title, titleCol, sub) {
+      return '<g transform="translate(' + x + ',0)">' +
+        '<rect x="0" y="14" width="196" height="86" rx="8" fill="#0a0c12" stroke="var(--line)"/>' +
+        '<path d="M18 30 C 70 42, 120 66, 178 84" fill="none" stroke="var(--accent)" stroke-width="2.4"/>' +
+        '<path d="' + resPath + '" fill="none" stroke="var(--good)" stroke-width="2.4"/>' +
+        '<text x="98" y="120" fill="' + titleCol + '" font-size="12.5" font-weight="600" ' +
+          'text-anchor="middle">' + title + '</text>' +
+        '<text x="98" y="136" fill="var(--dim)" font-size="11" text-anchor="middle">' + sub + '</text>' +
+        '</g>';
+    }
+    return figure(
+      '<svg viewBox="0 0 440 146" role="img" aria-label="Two traces. When the slide is done well ' +
+        'the pitch line falls while the resonance line rises. When pitch is lowered with the folds ' +
+        'alone, the pitch line falls but the resonance line stays flat.">' +
+      panel(10, 'M18 84 C 70 76, 120 50, 178 32', 'moving together', 'var(--good)',
+        'larynx rides down with the pitch') +
+      panel(234, 'M18 58 L178 58', 'folds alone', 'var(--warn)',
+        'pitch drops, space unchanged — tiring') +
+      '<g transform="translate(10,0)">' +
+        '<text x="0" y="9" fill="var(--accent)" font-size="11">— pitch</text>' +
+        '<text x="58" y="9" fill="var(--good)" font-size="11">— resonance</text>' +
+      '</g>' +
+      '</svg>',
+      'Both panels sound lower. Only the left one is something you can hold for a whole conversation.');
+  };
+
+  DIAGRAMS.weight = function () {
+    // "Weight" is the least intuitive of the four measures, and the one most
+    // easily faked by pressing — which is exactly what the diagram contrasts.
+    function folds(x, depth, title, titleCol, sub) {
+      var top = 62 - depth / 2;
+      return '<g transform="translate(' + x + ',0)">' +
+        '<rect x="20" y="16" width="58" height="92" rx="6" fill="var(--panel-2)" stroke="var(--line)"/>' +
+        '<rect x="118" y="16" width="58" height="92" rx="6" fill="var(--panel-2)" stroke="var(--line)"/>' +
+        '<rect x="78" y="' + top + '" width="40" height="' + depth + '" ' +
+          'fill="' + (titleCol === 'var(--good)' ? 'rgba(90,211,154,.35)' : 'rgba(240,180,94,.35)') + '" ' +
+          'stroke="' + titleCol + '" stroke-width="1.5"/>' +
+        '<line x1="190" y1="' + top + '" x2="190" y2="' + (top + depth) + '" stroke="' + titleCol + '" ' +
+          'stroke-width="1.5" marker-start="url(#ar-wt)" marker-end="url(#ar-wt)"/>' +
+        '<text x="98" y="128" fill="' + titleCol + '" font-size="12.5" font-weight="600" ' +
+          'text-anchor="middle">' + title + '</text>' +
+        '<text x="98" y="144" fill="var(--dim)" font-size="11" text-anchor="middle">' + sub + '</text>' +
+        '</g>';
+    }
+    return figure(
+      '<svg viewBox="0 0 440 154" role="img" aria-label="The vocal folds seen from the front. Heavy ' +
+        'folds touch over a deep area and give a full low note. Pressed folds touch over a shallow ' +
+        'area and give a thin low note that costs effort.">' +
+      arrowDef('ar-wt', 'var(--dim)') +
+      folds(6, 52, 'heavy — sustainable', 'var(--good)', 'deep contact, full sound') +
+      folds(226, 14, 'pressed thin', 'var(--warn)', 'shallow contact, effortful') +
+      '</svg>',
+      'Both can land on the same note. The weight meter is how you tell which one you just did.');
+  };
+
+  DIAGRAMS.glide = function () {
+    return figure(
+      '<svg viewBox="0 0 460 140" role="img" aria-label="A sigh gliding downward. The clear part of ' +
+        'the glide is counted; the creaky tail past your comfortable floor is not.">' +
+      '<rect x="12" y="10" width="436" height="92" rx="9" fill="#0a0c12" stroke="var(--line)"/>' +
+      '<line x1="12" y1="76" x2="448" y2="76" stroke="rgba(90,211,154,.5)" stroke-width="1.5" ' +
+        'stroke-dasharray="5 4"/>' +
+      '<path d="M40 26 C 120 34, 190 58, 250 74" fill="none" stroke="var(--good)" stroke-width="2.6"/>' +
+      '<path d="M250 74 C 300 84, 350 90, 420 93" fill="none" stroke="var(--bad)" stroke-width="2.6" ' +
+        'stroke-dasharray="3 4"/>' +
+      '<circle cx="250" cy="74" r="4.5" fill="var(--good)"/>' +
+      '<line x1="250" y1="79" x2="250" y2="112" stroke="var(--line)" stroke-width="1.5"/>' +
+      '<text x="20" y="70" fill="var(--good)" font-size="11.5">clear — counted</text>' +
+      '<text x="440" y="66" fill="var(--bad)" font-size="11.5" text-anchor="end">creaky — not counted</text>' +
+      '<text x="250" y="128" fill="var(--text)" font-size="11.5" text-anchor="middle">' +
+        'your comfortable floor</text>' +
+      '</svg>',
+      'The floor is where the tone stops being clear, not where sound stops coming out. ' +
+      'Pushing past the dot measures your creak, which is not a note you can speak on.');
+  };
+
+  DIAGRAMS.terminal = function () {
+    // The thing being trained is a shape, and the shape is the whole
+    // explanation — so the two endings are drawn side by side at the same
+    // pitch, because it is the last half-second that differs and nothing else.
+    function panel(x, path, tail, title, titleCol, sub) {
+      return '<g transform="translate(' + x + ',0)">' +
+        '<rect x="0" y="14" width="196" height="86" rx="8" fill="#0a0c12" stroke="var(--line)"/>' +
+        '<path d="' + path + '" fill="none" stroke="var(--accent)" stroke-width="2.4"/>' +
+        '<path d="' + tail + '" fill="none" stroke="' + titleCol + '" stroke-width="2.8"/>' +
+        '<line x1="128" y1="20" x2="128" y2="94" stroke="var(--line)" stroke-width="1" ' +
+          'stroke-dasharray="3 4"/>' +
+        '<text x="98" y="120" fill="' + titleCol + '" font-size="12.5" font-weight="600" ' +
+          'text-anchor="middle">' + title + '</text>' +
+        '<text x="98" y="136" fill="var(--dim)" font-size="11" text-anchor="middle">' + sub + '</text>' +
+        '</g>';
+    }
+    return figure(
+      '<svg viewBox="0 0 440 146" role="img" aria-label="Two pitch traces of the same sentence. In ' +
+        'the first the last syllable is held long and slides upward, which makes a statement sound ' +
+        'like a question. In the second the last syllable is short and drops.">' +
+      panel(10, 'M16 62 C 50 54, 90 66, 128 60', 'M128 60 C 150 50, 166 40, 186 30',
+        'held and rising', 'var(--warn)', 'a statement that asks') +
+      panel(234, 'M16 62 C 50 54, 90 66, 128 60', 'M128 60 C 138 66, 146 76, 154 86',
+        'short and landing', 'var(--good)', 'a statement that states') +
+      '<text x="10" y="9" fill="var(--dim)" font-size="11">pitch over one sentence — ' +
+        'dotted line is the last syllable</text>' +
+      '</svg>',
+      'Both sentences can sit at exactly the same average pitch. The ending is a separate habit from ' +
+      'the pitch, which is why it gets its own drill.');
+  };
+
+  // The one diagram carrying live numbers: where your own voice sits on the
+  // scale the targets are drawn from.
+  DIAGRAMS.pitchMap = function (opts) {
+    opts = opts || {};
+    // 190 Hz is the bottom of the cis-female average band (RESEARCH.md §2) and
+    // is local to this drawing: nothing in the tool targets it, it is only the
+    // point past which the "reads female" label is honest.
+    var LO = 80, HI = 260, FEM_FLOOR = 190, W = 460, PAD = 14;
+    function x(hz) { return PAD + (Math.min(HI, Math.max(LO, hz)) - LO) / (HI - LO) * (W - PAD * 2); }
+    function zone(lo, hi, fill) {
+      return '<rect x="' + x(lo).toFixed(1) + '" y="30" width="' + (x(hi) - x(lo)).toFixed(1) +
+        '" height="30" fill="' + fill + '"/>';
+    }
+    function pin(hz, label, col, up) {
+      if (hz == null) return '';
+      var px = x(hz).toFixed(1);
+      return '<g><line x1="' + px + '" y1="' + (up ? 22 : 30) + '" x2="' + px + '" y2="' +
+        (up ? 60 : 70) + '" stroke="' + col + '" stroke-width="2"/>' +
+        '<text x="' + px + '" y="' + (up ? 17 : 84) + '" fill="' + col + '" font-size="11.5" ' +
+        'text-anchor="middle">' + label + '</text></g>';
+    }
+    var ticks = [100, 130, 165, 200, 240].map(function (t) {
+      return '<text x="' + x(t).toFixed(1) + '" y="104" fill="var(--dim)" font-size="10.5" ' +
+        'text-anchor="middle">' + t + '</text>';
+    }).join('');
+    return figure(
+      '<svg viewBox="0 0 460 112" role="img" aria-label="A scale of speaking pitch in hertz. Below ' +
+        '130 hertz listeners reliably hear a voice as male; between 140 and 165 hertz they stop ' +
+        'agreeing; above roughly 190 hertz they reliably hear it as female.">' +
+      zone(LO, MASC_F0_CEILING, 'rgba(90,211,154,.22)') +
+      zone(MASC_F0_CEILING, ANDROGYNOUS_LOW, 'rgba(90,211,154,.10)') +
+      zone(ANDROGYNOUS_LOW, ANDROGYNOUS_HIGH, 'rgba(240,180,94,.20)') +
+      zone(ANDROGYNOUS_HIGH, FEM_FLOOR, 'rgba(110,168,255,.06)') +
+      zone(FEM_FLOOR, HI, 'rgba(110,168,255,.16)') +
+      '<rect x="' + PAD + '" y="30" width="' + (W - PAD * 2) + '" height="30" fill="none" ' +
+        'stroke="var(--line)" rx="4"/>' +
+      '<text x="' + x(105).toFixed(1) + '" y="49" fill="var(--good)" font-size="11" ' +
+        'text-anchor="middle">reads male</text>' +
+      '<text x="' + x(152).toFixed(1) + '" y="49" fill="var(--warn)" font-size="10.5" ' +
+        'text-anchor="middle">ambiguous</text>' +
+      '<text x="' + x(224).toFixed(1) + '" y="49" fill="var(--accent)" font-size="11" ' +
+        'text-anchor="middle">reads female</text>' +
+      ticks +
+      pin(opts.now, 'you now', 'var(--text)', true) +
+      pin(opts.target, 'target', 'var(--good)', false) +
+      '</svg>',
+      opts.caption || 'Hz. The ambiguous band is a real change in how listeners hear a voice, not a ' +
+      'smooth gradient — which is why crossing it is worth more than the same drop anywhere else.');
+  };
+
+  // ==========================================================================
+  // exercises
+  // ==========================================================================
+
+  var current = null;
+
+  var PASSAGE = 'When the sunlight strikes raindrops in the air, they act as a prism and form a ' +
+    'rainbow. The rainbow is a division of white light into many beautiful colors.';
+
+  // Statements for the endings drill. Every one ends on a stressed syllable with
+  // a voiced nucleus, so the final contour is actually measurable — an ending
+  // like "...at six" goes unvoiced on the last consonant and the fall lands in
+  // silence where nothing can read it.
+  var STATEMENTS = [
+    'I finished it this morning.',
+    'The meeting is on Tuesday.',
+    'I already know how it ends.',
+    'That is not what I ordered.',
+    'We can talk about it tomorrow.',
+    'I left the keys on the table.',
+    'It took about an hour.',
+    'I will be there in the evening.'
+  ];
+
+  var EXERCISES = [
+    {
+      id: 'calibrate',
+      title: 'Calibrate',
+      sub: 'Measure your baseline and floor',
+      build: buildCalibrate
+    },
+    {
+      id: 'straw',
+      title: '1. Straw warm-up',
+      sub: 'Semi-occluded, lowest strain',
+      build: function () {
+        return simpleExercise({
+          title: 'Straw phonation warm-up',
+          why: 'A semi-occluded vocal tract balances the pressure above and below the vocal folds, ' +
+               'which lets you work at the bottom of your range with far less collision force. ' +
+               'This is the standard warm-up before any pitch work.',
+          steps: [
+            'Seal your lips around a narrow straw — a coffee stirrer is ideal.',
+            'Hum at a comfortable pitch and hold it steady.',
+            'Aim for a flat line on the trace, for two minutes.'
+          ],
+          note: '<b>This is not a pitch-lowering exercise.</b> Wobble in the line means you are ' +
+                'pushing; back off until it settles rather than trying to hold the number down.',
+          diagram: DIAGRAMS.straw,
+          showBand: false,
+          goalSeconds: 120,
+          measure: 'steady'
+        });
+      }
+    },
+    {
+      id: 'yawn',
+      title: '2. Yawn-sigh',
+      sub: 'Larynx lowering — resonance only',
+      build: buildYawn
+    },
+    {
+      id: 'ng',
+      title: '3. "Ng" slides',
+      sub: 'Pitch and resonance together',
+      build: function () {
+        return simpleExercise({
+          title: '"Ng" descending slides',
+          why: 'The /ŋ/ at the end of "sing" couples the vocal tract to the nasal cavity and makes ' +
+               'larynx height easy to feel. Sliding downward on it trains pitch and resonance to ' +
+               'move together, which is what a naturally low voice does.',
+          steps: [
+            'Hold the "ng" from the end of <i>sing</i>.',
+            'Slide slowly downward, letting the larynx ride down with the pitch.',
+            'Watch for pitch falling <i>and</i> resonance growing at the same time.'
+          ],
+          note: 'If resonance stays flat while the pitch drops, you are lowering pitch with the ' +
+                'folds alone — that is the tiring way, and it is the thing this exercise exists ' +
+                'to catch.',
+          diagram: DIAGRAMS.ng,
+          showBand: true,
+          goalSeconds: 90,
+          measure: 'both'
+        });
+      }
+    },
+    {
+      id: 'vowels',
+      title: '4. Sustained vowels',
+      sub: 'Hold the target pitch',
+      build: function () {
+        return simpleExercise({
+          title: 'Sustained vowels at target pitch',
+          why: 'Holding your target pitch on an open vowel builds the muscle memory to start speech ' +
+               'there. The weight meter tells you whether you are getting there with fold thickness ' +
+               '(sustainable) or by pressing (not).',
+          steps: [
+            'Sustain "ah" inside the shaded target band.',
+            'Aim for 8 of every 10 seconds in the band.',
+            'Keep weight at or above your baseline.'
+          ],
+          note: 'A thin, pressed low note is the failure mode: it hits the number and teaches your ' +
+                'voice the wrong habit. If weight reads <b>lighter</b>, come up a few hertz and ' +
+                'sustain there instead.',
+          diagram: DIAGRAMS.weight,
+          showBand: true,
+          goalSeconds: 90,
+          measure: 'both'
+        });
+      }
+    },
+    {
+      id: 'glide',
+      title: '5. Pitch glides',
+      sub: 'Re-measure your floor',
+      build: buildGlide
+    },
+    {
+      id: 'endings',
+      title: '6. Statement endings',
+      sub: 'Land the last syllable',
+      build: buildIntonation
+    },
+    {
+      id: 'passage',
+      title: '7. Reading passage',
+      sub: 'All four measures live',
+      build: buildPassage
+    },
+    {
+      id: 'free',
+      title: '8. Free speech',
+      sub: 'No live meters — report after',
+      build: buildFree
+    },
+    {
+      id: 'progress',
+      title: 'Progress',
+      sub: 'Your scored takes over time',
+      build: buildProgress
+    }
+  ];
+
+  function renderExList() {
+    var calibrated = base.habitualF0 != null;
+    document.getElementById('exList').innerHTML = EXERCISES.map(function (e) {
+      var isCal = e.id === 'calibrate';
+      var locked = !isCal && !calibrated;
+      // "3. Ng slides" -> badge 3, title "Ng slides". Calibration is the
+      // prerequisite rather than a numbered step, so it gets a state glyph.
+      var m = /^(\d+)\.\s*(.*)$/.exec(e.title);
+      var badge = isCal ? (calibrated ? '✓' : '!')
+        // A count here would read as a step number beside the numbered drills.
+        : e.id === 'progress' ? '↗'
+        : (m ? m[1] : '·');
+      var title = m ? m[2] : e.title;
+      return '<button class="ex' + (current && current.id === e.id ? ' active' : '') +
+        (isCal && calibrated ? ' done' : '') + '" data-id="' + e.id + '"' +
+        (locked ? ' disabled title="Calibrate first"' : '') + '>' +
+        '<span class="n" aria-hidden="true">' + badge + '</span>' +
+        '<span><span class="t">' + title + '</span><span class="s" style="display:block">' + e.sub + '</span></span>' +
+        '</button>';
+    }).join('') + (calibrated ? '' :
+      '<p class="locked-note">Practice unlocks once you have calibrated — the targets are all derived from your own voice.</p>');
+    Array.prototype.forEach.call(document.querySelectorAll('.ex'), function (b) {
+      b.onclick = function () { openExercise(b.dataset.id); };
+    });
+  }
+
+  function openExercise(id) {
+    var def = EXERCISES.filter(function (e) { return e.id === id; })[0];
+    if (!def) return;
+    if (current && current.abort) current.abort();
+    current = null;
+    resetSmoothers();
+    var built = def.build();
+    built.id = id;
+    document.getElementById('pane').innerHTML = built.html;
+    current = built;
+    if (built.mount) built.mount();
+    syncMicControls();
+    renderExList();
+  }
+
+  // --- generic live-meter exercise -----------------------------------------
+
+  // Steps, cautions and diagrams are worth reading once and are in the way
+  // every session after that. Folding them away puts the meters back within a
+  // glance of the thing you are doing, instead of a screenful below it — the
+  // same reason the endings drill keeps its prompt and its verdict adjacent.
+  function explainer(cfg) {
+    var body =
+      (cfg.steps ? '<ol class="steps">' +
+        cfg.steps.map(function (s) { return '<li>' + s + '</li>'; }).join('') + '</ol>' : '') +
+      (cfg.note ? '<p class="note">' + cfg.note + '</p>' : '') +
+      (cfg.diagram ? cfg.diagram() : '') +
+      (cfg.extra || '');
+    if (!body) return '';
+    return '<details class="explain"><summary>' +
+      (cfg.summary || 'How to do it, and why it works') + '</summary><div>' + body + '</div></details>';
+  }
+
+  function simpleExercise(cfg) {
+    var html =
+      '<div class="card">' +
+        '<h3>' + cfg.title + '</h3>' +
+        '<p class="why">' + cfg.why + '</p>' +
+        explainer(cfg) +
+        '<canvas id="rib" class="trace" style="height:210px" role="img" aria-label="Live pitch trace"></canvas>' +
+        '<div class="meters">' +
+          meter('m-pitch', 'Pitch', '', true) +
+          meter('m-res', 'Resonance', '', true) +
+          meter('m-weight', 'Weight') +
+          meter('m-time', cfg.showBand ? 'In target' : 'Voiced time', '', true) +
+        '</div>' +
+        takeControls('Start take') +
+      '</div>';
+
+    var rib, running = false, inBandMs = 0, voicedMs = 0, band = null, lastTs = null;
+
+    function setRunning(el, on) {
+      running = on;
+      inBandMs = 0; voicedMs = 0; lastTs = null;
+      rib.pts = [];
+      el.textContent = on ? 'Stop' : 'Start take';
+      el.className = on ? 'recording' : 'primary';
+      document.getElementById('status').textContent = on ? 'recording — nothing is saved' : '';
+    }
+
+    return {
+      html: html,
+      mount: function () {
+        rib = new Ribbon(document.getElementById('rib'));
+        rib.resize();
+        band = cfg.showBand ? targetBand() : null;
+        rib.draw(band);
+        document.getElementById('go').onclick = function () { setRunning(this, !running); };
+      },
+      abort: function () {
+        if (running) setRunning(document.getElementById('go'), false);
+      },
+      frame: function (a, ts) {
+        var f0 = smoothF0.value();
+        var inBand = !!(band && f0 && f0 >= band.lo && f0 <= band.hi);
+        setMeter('m-pitch', a.voiced && f0 ? f0.toFixed(0) + ' Hz' : '--',
+          band ? 'target ' + band.center.toFixed(0) + ' Hz' : 'comfortable is fine',
+          { hit: inBand, fill: a.voiced && f0 ? pitchFill(f0) : 0,
+            markAt: band ? pitchFill(band.center) : null });
+
+        var res = smoothRes.value();
+        setMeter('m-res', res ? res.toFixed(1) + ' cm' : '--', resonanceSub(res),
+          resonanceMeterOpts(res));
+
+        var w = smoothWeight.value();
+        setMeter('m-weight', weightLabel(w), weightSub(w));
+
+        // Real elapsed time, not a frame count: frame rate varies by display
+        // and by load, so counting frames made a 120 Hz screen read half speed.
+        var dt = lastTs == null ? 0 : Math.min(100, ts - lastTs);
+        lastTs = ts;
+
+        if (running) {
+          rib.push(a.voiced ? f0 : 0);
+          if (a.voiced && f0) {
+            voicedMs += dt;
+            if (inBand) inBandMs += dt;
+          }
+          var pct = voicedMs ? (inBandMs / voicedMs * 100) : 0;
+          var secs = voicedMs / 1000;
+          setMeter('m-time', band ? pct.toFixed(0) + '%' : secs.toFixed(0) + ' s',
+            band ? 'aim for 80%' : 'of ' + cfg.goalSeconds + ' s',
+            band ? { hit: pct >= 80, fill: pct / 100, markAt: 0.8 }
+                 : { hit: secs >= cfg.goalSeconds, fill: secs / cfg.goalSeconds });
+        }
+        rib.draw(band);
+      }
+    };
+  }
+
+  // Shared start/stop row. The button is inert without a microphone rather than
+  // erroring on click.
+  function takeControls(label, extra) {
+    return '<div class="row">' +
+      '<button id="go" class="primary" data-needs-mic>' + label + '</button>' +
+      (extra || '') +
+      '<span id="status" style="color:var(--dim);font-size:13px"></span>' +
+      '</div>' + micHint();
+  }
+  function micHint() {
+    return '<div class="banner info compact" id="micHint" hidden style="margin:12px 0 0">' +
+      '<span aria-hidden="true">🎙</span><span>Press <b>Start microphone</b> in the top bar to enable this ' +
+      'exercise. Nothing is uploaded or recorded — every frame is analysed and discarded.</span>' +
+      '</div>';
+  }
+
+  function resonanceSub(res) {
+    if (res == null) return 'lower larynx = larger number';
+    if (base.resonance == null) return 'lower larynx = larger number';
+    var goal = (RESONANCE_GOAL - 1) * 100;
+    return pctVsBaseline(res, base.resonance) + ' vs baseline (goal +' + goal.toFixed(0) + '%)';
+  }
+  // Signed percentage change, rounded before the sign is chosen so a value a
+  // hair under the baseline reads "+0.0%" rather than "-0.0%".
+  function pctVsBaseline(value, baseline) {
+    var pct = (value / baseline - 1) * 100;
+    if (Math.abs(pct) < 0.05) pct = 0;
+    return (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+  }
+
+  // Bar runs from baseline to the goal, so "full" means the goal is reached.
+  function resonanceMeterOpts(res) {
+    if (res == null || base.resonance == null) return { hit: false, fill: 0 };
+    var span = base.resonance * (RESONANCE_GOAL - 1);
+    return {
+      hit: res >= base.resonance * RESONANCE_GOAL,
+      fill: (res - base.resonance) / span,
+      markAt: 1
+    };
+  }
+  // Weight is the softest of the four measures and is only ever meaningful
+  // against your own baseline — with no baseline there is nothing to say, so
+  // the raw number is withheld rather than shown as if it meant something.
+  function weightLabel(w) {
+    if (w == null || base.weight == null) return '--';
+    var d = w - base.weight;
+    if (d > 2) return 'heavier';
+    if (d < -2) return 'lighter';
+    return 'baseline';
+  }
+  function weightSub(w) {
+    if (base.weight == null) return 'calibrate to get a reference';
+    if (w == null) return 'relative to your baseline';
+    return (w - base.weight >= 0 ? '+' : '') + (w - base.weight).toFixed(1) + ' vs baseline';
+  }
+
+  // --- yawn-sigh: resonance only, pitch deliberately hidden ------------------
+
+  function buildYawn() {
+    var html =
+      '<div class="card">' +
+        '<h3>Yawn-sigh — lowering the larynx</h3>' +
+        '<p class="why">A larger resonating space is the single biggest non-pitch cue to a masculine ' +
+        'voice, and unlike pitch it costs your voice nothing. Beginning a yawn drops the larynx; the ' +
+        'sigh keeps it there while you make sound.</p>' +
+        explainer({
+          steps: [
+            'Begin a yawn, and feel the voice box drop in your neck.',
+            'Before the yawn finishes, sigh out an easy open "ahh".',
+            'Let the pitch land wherever it wants — only resonance is scored here.'
+          ],
+          diagram: DIAGRAMS.larynx,
+          extra: '<div class="banner info" style="margin:14px 0 0">' +
+            'The pitch readout is hidden on purpose. Larynx height and pitch tend to move together, ' +
+            'and separating them is the skill this exercise builds — so pitch is removed from view ' +
+            'rather than left as something to chase.</div>'
+        }) +
+        '<canvas id="resCanvas" class="trace" role="img" aria-label="Live resonance trace"></canvas>' +
+        '<div class="meters">' +
+          meter('m-res', 'Resonance', '', true) +
+          meter('m-best', 'Best this take') +
+          '<div class="meter muted"><div class="lab">Pitch</div><div class="val">—</div>' +
+            '<div class="sub">hidden for this exercise</div></div>' +
+        '</div>' +
+        takeControls('Start take') +
+      '</div>';
+
+    var cv, g, hist = [], running = false, best = null;
+
+    function draw() {
+      var r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      if (cv.width !== Math.round(r.width * dpr)) {
+        cv.width = r.width * dpr; cv.height = r.height * dpr;
+        g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+      var w = r.width, h = r.height;
+      g.clearRect(0, 0, w, h);
+      g.fillStyle = '#0e1016'; g.fillRect(0, 0, w, h);
+
+      var lo = 12, hi = 24;
+      function y(v) { return h - ((v - lo) / (hi - lo)) * h; }
+
+      if (base.resonance != null) {
+        var yb = y(base.resonance), yg = y(base.resonance * RESONANCE_GOAL);
+        g.fillStyle = 'rgba(90,211,154,.10)';
+        g.fillRect(0, 0, w, yg);
+        g.strokeStyle = 'rgba(90,211,154,.55)'; g.setLineDash([4, 4]);
+        g.beginPath(); g.moveTo(0, yg); g.lineTo(w, yg); g.stroke();
+        g.strokeStyle = 'rgba(143,151,173,.45)';
+        g.beginPath(); g.moveTo(0, yb); g.lineTo(w, yb); g.stroke();
+        g.setLineDash([]);
+        g.fillStyle = 'rgba(90,211,154,.9)'; g.font = '11px system-ui';
+        g.fillText('goal ' + (base.resonance * RESONANCE_GOAL).toFixed(1) + ' cm', 6, yg - 5);
+        g.fillStyle = 'rgba(143,151,173,.8)';
+        g.fillText('baseline ' + base.resonance.toFixed(1) + ' cm', 6, yb + 13);
+      }
+
+      g.strokeStyle = '#6ea8ff'; g.lineWidth = 2.2;
+      var drawing = false;
+      for (var i = 0; i < hist.length; i++) {
+        if (hist[i] == null) { if (drawing) { g.stroke(); drawing = false; } continue; }
+        var x = i * 2, yy = y(Math.min(hi, Math.max(lo, hist[i])));
+        if (!drawing) { g.beginPath(); g.moveTo(x, yy); drawing = true; } else g.lineTo(x, yy);
+      }
+      if (drawing) g.stroke();
+    }
+
+    function setRunning(el, on) {
+      running = on; hist = []; best = null;
+      el.textContent = on ? 'Stop' : 'Start take';
+      el.className = on ? 'recording' : 'primary';
+      document.getElementById('status').textContent = on ? 'recording — nothing is saved' : '';
+    }
+
+    return {
+      html: html,
+      mount: function () {
+        cv = document.getElementById('resCanvas');
+        g = cv.getContext('2d');
+        draw();
+        document.getElementById('go').onclick = function () { setRunning(this, !running); };
+      },
+      abort: function () {
+        if (running) setRunning(document.getElementById('go'), false);
+      },
+      frame: function () {
+        var res = smoothRes.value();
+        setMeter('m-res', res ? res.toFixed(1) + ' cm' : '--', resonanceSub(res),
+          resonanceMeterOpts(res));
+        if (running) {
+          hist.push(res);
+          if (res != null && (best == null || res > best)) best = res;
+          while (hist.length > 400) hist.shift();
+          setMeter('m-best', best != null ? best.toFixed(1) + ' cm' : '--',
+            base.resonance != null && best != null
+              ? pctVsBaseline(best, base.resonance) + ' above baseline' : '');
+          draw();
+        }
+      }
+    };
+  }
+
+  // --- calibration ----------------------------------------------------------
+
+  function buildCalibrate() {
+    var html =
+      '<div class="card">' +
+        '<h3>Calibrate</h3>' +
+        '<p class="why">Every target this tool shows is derived from your own voice, not from a ' +
+        'population average. Two measurements are needed: how you speak now, and how low you can ' +
+        'comfortably go. The second one exists so the tool can refuse to set a target that would ' +
+        'have you grinding at the bottom of your range.</p>' +
+        '<div id="calStep"></div>' +
+      '</div>';
+
+    var stage = 0, collecting = false;
+    var f0s = [], resList = [], weights = [], lowest = null;
+    var voicedMs = 0, lastTs = null;
+
+    function render() {
+      var el = document.getElementById('calStep');
+      if (stage === 0) {
+        el.innerHTML =
+          '<div class="banner info">Step 1 of 2 — habitual voice</div>' +
+          '<p>Read this aloud in your completely normal, everyday voice. Do not try to change it; ' +
+          'this measurement is the reference everything else is compared against.</p>' +
+          '<div class="passage">' + PASSAGE + '</div>' +
+          '<div class="meters">' + meter('c-f0', 'Pitch') + meter('c-res', 'Resonance') +
+            meter('c-n', 'Voiced speech', '', true) + '</div>' +
+          '<div class="row"><button id="calGo" class="primary" data-needs-mic>Start reading</button>' +
+          '<span id="calStatus" style="color:var(--dim);font-size:13px"></span></div>' + micHint();
+        document.getElementById('calGo').onclick = toggle;
+      } else if (stage === 1) {
+        el.innerHTML =
+          '<div class="banner info">Step 2 of 2 — comfortable floor</div>' +
+          '<p>Sigh downward on "ahh" from a comfortable pitch, and stop the moment the sound turns ' +
+          'creaky, breathy, or effortful. <b>Do not push for your lowest possible note</b> — the point ' +
+          'is the lowest note that still sounds clear and takes no effort. Do it three or four times.</p>' +
+          explainer({ summary: 'What counts as the bottom of your range', diagram: DIAGRAMS.glide }) +
+          '<div class="meters">' + meter('c-f0', 'Pitch') + meter('c-low', 'Lowest clear') + '</div>' +
+          '<div class="row"><button id="calGo" class="primary" data-needs-mic>Start glides</button>' +
+          '<span id="calStatus" style="color:var(--dim);font-size:13px"></span></div>' + micHint();
+        document.getElementById('calGo').onclick = toggle;
+      } else {
+        var t = pitchTarget();
+        el.innerHTML =
+          '<div class="banner info">Calibration complete</div>' +
+          '<table><tr><th>Measure</th><th>Value</th></tr>' +
+          '<tr><td>Habitual pitch</td><td class="num">' + base.habitualF0.toFixed(0) + ' Hz</td></tr>' +
+          '<tr><td>Comfortable floor</td><td class="num">' + base.safeFloor.toFixed(0) + ' Hz</td></tr>' +
+          '<tr><td>Pitch target</td><td class="num">' + t.hz.toFixed(0) + ' Hz</td></tr>' +
+          '<tr><td>Resonance baseline</td><td class="num">' + (base.resonance != null ? base.resonance.toFixed(1) + ' cm' : 'not measured') + '</td></tr>' +
+          '<tr><td>Resonance goal</td><td class="num">' + (base.resonance != null ? (base.resonance * RESONANCE_GOAL).toFixed(1) + ' cm' : '—') + '</td></tr>' +
+          '<tr><td>Intonation</td><td class="num">' + (base.intonationSd != null ? base.intonationSd.toFixed(1) + ' st' : '—') + '</td></tr>' +
+          '</table>' +
+          DIAGRAMS.pitchMap({
+            now: base.habitualF0,
+            target: t.hz,
+            caption: 'Hz. Your habitual pitch and the target this tool will hold you to. The amber ' +
+              'band is where listeners stop agreeing on a voice — a real change in perception, not ' +
+              'a smooth gradient, which is why crossing it buys more than the same drop elsewhere.'
+          }) +
+          interpretation(t) +
+          '<div class="row"><button id="calDone" class="primary">Start practising</button></div>';
+        document.getElementById('calDone').onclick = function () { openExercise('straw'); };
+      }
+    }
+
+    function interpretation(t) {
+      var out = [];
+      if (t.noHeadroom) {
+        out.push('<div class="banner safety" style="margin-top:14px">There is no safe room to lower ' +
+          'your pitch right now: your comfortable floor sits less than ' + FLOOR_MARGIN_ST + ' semitones ' +
+          'below where you already speak, so the pitch target is simply where you are. This is a real ' +
+          'result, not a measurement failure — and it is much less limiting than it sounds. Pitch ' +
+          'accounts for under half of what makes a voice read as masculine; resonance is the larger ' +
+          'share and is not constrained by your range at all. Work the yawn-sigh and "ng" exercises, ' +
+          'and re-run the glides in a few weeks — the floor usually drops as technique improves.</div>');
+      } else if (t.limited) {
+        out.push('<div class="banner safety" style="margin-top:14px">Your target is set by your ' +
+          'comfortable floor rather than by the 130 Hz mark, because reaching 130 Hz would put you ' +
+          'within ' + FLOOR_MARGIN_ST + ' semitones of the bottom of your range. That is the right ' +
+          'outcome, not a limitation of your voice: pitch explains under half of what makes a voice ' +
+          'read as masculine, and resonance is both safer and available to you now. Weight the ' +
+          'yawn-sigh and "ng" exercises more heavily.</div>');
+      } else if (base.habitualF0 <= ANDROGYNOUS_LOW) {
+        out.push('<div class="banner info" style="margin-top:14px">You already speak at or below the ' +
+          'ambiguous zone (' + ANDROGYNOUS_LOW + '-' + ANDROGYNOUS_HIGH + ' Hz), where listeners stop ' +
+          'reliably hearing a voice as female. Resonance and weight will do more for you than further ' +
+          'pitch lowering.</div>');
+      } else if (base.habitualF0 < ANDROGYNOUS_HIGH) {
+        out.push('<div class="banner info" style="margin-top:14px">You already speak inside the ambiguous ' +
+          'zone (' + ANDROGYNOUS_LOW + '-' + ANDROGYNOUS_HIGH + ' Hz), where gender recognition accuracy ' +
+          'drops sharply — so you are past the steepest part of the curve already. There is still safe ' +
+          'room to lower pitch toward your target, but resonance is the larger share of the effect from ' +
+          'here on.</div>');
+      }
+      return out.join('');
+    }
+
+    function toggle() {
+      collecting = !collecting;
+      this.textContent = collecting ? 'Stop' : 'Start';
+      this.className = collecting ? 'recording' : 'primary';
+      if (collecting) {
+        f0s = []; resList = []; weights = []; lowest = null;
+        voicedMs = 0; lastTs = null;
+        intonation.reset();
+        document.getElementById('calStatus').textContent = 'listening…';
+      } else {
+        finishStage();
+      }
+    }
+
+    function finishStage() {
+      if (stage === 0) {
+        if (voicedMs < MIN_VOICED_MS_CALIBRATE) {
+          document.getElementById('calStatus').textContent =
+            'Only ' + (voicedMs / 1000).toFixed(1) + ' s of voiced speech captured, and ' +
+            (MIN_VOICED_MS_CALIBRATE / 1000) + ' s are needed. Read it again, a little more slowly.';
+          return;
+        }
+        base.habitualF0 = median(f0s);
+        base.resonance = resList.length >= MIN_FRAMES_FOR_MEDIAN ? median(resList) : null;
+        base.weight = weights.length >= MIN_FRAMES_FOR_MEDIAN ? median(weights) : null;
+        // Over the whole reading, not the rolling live window — a baseline
+        // measured over the last 10 s only is not the same quantity a take is
+        // later compared against.
+        base.intonationSd = semitoneSd(f0s);
+        save();
+        // The baseline reading is the first point on every progress chart —
+        // without it the trend has nothing to start from.
+        recordTake('calibration', {
+          f0: base.habitualF0, res: base.resonance,
+          weight: base.weight, sd: base.intonationSd
+        });
+        stage = 1;
+        render();
+      } else if (stage === 1) {
+        if (lowest == null) {
+          document.getElementById('calStatus').textContent = 'No clear low notes captured. Try again.';
+          return;
+        }
+        base.safeFloor = lowest;
+        save();
+        stage = 2;
+        render();
+      }
+    }
+
+    return {
+      html: html,
+      mount: render,
+      abort: function () {
+        if (collecting) {
+          collecting = false;
+          var b = document.getElementById('calGo');
+          if (b) { b.textContent = 'Start'; b.className = 'primary'; }
+          document.getElementById('calStatus').textContent =
+            'Microphone stopped — this measurement was discarded. Start it again and retake.';
+        }
+      },
+      frame: function (a, ts) {
+        if (!collecting) return;
+        var f0 = smoothF0.value();
+        var dt = lastTs == null ? 0 : Math.min(100, ts - lastTs);
+        lastTs = ts;
+        if (stage === 0) {
+          if (a.voiced && f0) {
+            voicedMs += dt;
+            f0s.push(f0);
+            if (a.resonance != null) resList.push(a.resonance);
+            if (a.weightRaw != null) weights.push(a.weightRaw);
+          }
+          var res0 = smoothRes.value();
+          setMeter('c-f0', f0 ? f0.toFixed(0) + ' Hz' : '--');
+          setMeter('c-res', res0 ? res0.toFixed(1) + ' cm' : '--');
+          var enough = voicedMs >= MIN_VOICED_MS_CALIBRATE;
+          setMeter('c-n', (voicedMs / 1000).toFixed(1) + ' s',
+            enough ? 'enough — press Stop' : 'need ' + (MIN_VOICED_MS_CALIBRATE / 1000) + ' s of voice',
+            { hit: enough, fill: voicedMs / MIN_VOICED_MS_CALIBRATE });
+        } else if (stage === 1) {
+          // Only accept clearly periodic frames. A creaky or pressed bottom note
+          // has high aperiodicity, and counting it would set the floor too low —
+          // which is exactly the failure this step exists to prevent.
+          if (a.voiced && f0 && a.aperiodicity < 0.2 && a.rms > 0.02) {
+            if (lowest == null || f0 < lowest) lowest = f0;
+          }
+          setMeter('c-f0', f0 ? f0.toFixed(0) + ' Hz' : '--',
+            a.voiced ? (a.aperiodicity < 0.2 ? 'clear' : 'too creaky to count') : '');
+          setMeter('c-low', lowest ? lowest.toFixed(0) + ' Hz' : '--', 'lowest clear tone');
+        }
+      }
+    };
+  }
+
+  function median(arr) {
+    var s = arr.slice().sort(function (a, b) { return a - b; });
+    var m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+
+  // Intonation range over a whole take, in semitones. The live meter uses the
+  // 10 s rolling window; scored numbers use every frame of the take, so a
+  // baseline and a later take are the same measurement over the same span.
+  function semitoneSd(f0List) {
+    if (!f0List || f0List.length < 2) return null;
+    var st = f0List.map(function (hz) { return DSP.hzToSemitones(hz); });
+    var m = 0, i;
+    for (i = 0; i < st.length; i++) m += st[i];
+    m /= st.length;
+    var s = 0;
+    for (i = 0; i < st.length; i++) s += (st[i] - m) * (st[i] - m);
+    return Math.sqrt(s / (st.length - 1));
+  }
+
+  // --- glides ---------------------------------------------------------------
+
+  function buildGlide() {
+    var html =
+      '<div class="card">' +
+        '<h3>Pitch glides — re-measure your floor</h3>' +
+        '<p class="why">Your comfortable range moves as technique improves. Re-measuring keeps the ' +
+        'pitch target honest instead of letting it drift away from what your voice can actually hold.</p>' +
+        explainer({
+          steps: [
+            'Sigh down on "ahh" from a comfortable pitch.',
+            'Stop the moment the tone turns creaky or effortful.',
+            'Repeat three or four times, then save the result as your new floor.'
+          ],
+          note: 'Creaky frames are discarded, so pushing past the clear part of the glide ' +
+                'does not lower your floor — it just adds nothing.',
+          diagram: DIAGRAMS.glide
+        }) +
+        '<canvas id="rib" class="trace" role="img" aria-label="Live pitch trace"></canvas>' +
+        '<div class="meters">' + meter('m-pitch', 'Pitch', '', true) + meter('m-low', 'Lowest clear') +
+          meter('m-cur', 'Current floor') + '</div>' +
+        takeControls('Start', '<button id="saveFloor" disabled>Save as new floor</button>') +
+      '</div>';
+
+    var rib, running = false, lowest = null;
+
+    function setRunning(el, on) {
+      running = on;
+      if (on) { lowest = null; rib.pts = []; }
+      el.textContent = on ? 'Stop' : 'Start';
+      el.className = on ? 'recording' : 'primary';
+    }
+
+    return {
+      html: html,
+      abort: function () {
+        if (running) setRunning(document.getElementById('go'), false);
+      },
+      mount: function () {
+        rib = new Ribbon(document.getElementById('rib'));
+        rib.resize(); rib.draw(null);
+        setMeter('m-cur', base.safeFloor != null ? base.safeFloor.toFixed(0) + ' Hz' : '--');
+        document.getElementById('go').onclick = function () { setRunning(this, !running); };
+        document.getElementById('saveFloor').onclick = function () {
+          if (lowest == null) return;
+          base.safeFloor = lowest;
+          save();
+          setMeter('m-cur', base.safeFloor.toFixed(0) + ' Hz');
+          document.getElementById('status').textContent = 'Floor updated — pitch target recalculated.';
+          this.disabled = true;
+        };
+      },
+      frame: function (a) {
+        var f0 = smoothF0.value();
+        var clear = a.voiced && f0 && a.aperiodicity < 0.2 && a.rms > 0.02;
+        setMeter('m-pitch', f0 ? f0.toFixed(0) + ' Hz' : '--',
+          a.voiced ? (clear ? 'clear' : 'creaky — not counted') : '',
+          { fill: f0 ? pitchFill(f0) : 0, hit: clear });
+        if (running) {
+          rib.push(a.voiced ? f0 : 0);
+          if (clear && (lowest == null || f0 < lowest)) {
+            lowest = f0;
+            document.getElementById('saveFloor').disabled = false;
+          }
+          setMeter('m-low', lowest ? lowest.toFixed(0) + ' Hz' : '--');
+          rib.draw(null);
+        }
+      }
+    };
+  }
+
+  // --- statement endings ----------------------------------------------------
+  //
+  // The only exercise that measures a *shape* rather than a level. Everything
+  // else here reports a number you could hold steady; a terminal contour only
+  // exists relative to the phrase it ends, so this drill cuts speech into
+  // phrases, finds the last syllable of each, and scores that.
+  //
+  // Two segmentations, and they do different jobs:
+  //
+  //   phrase    — silence longer than PHRASE_GAP_MS. Crude, and adequate only
+  //               because the drill asks for one sentence at a time.
+  //   syllable  — a dip in loudness, not a gap in voicing. Voicing is the wrong
+  //               cue: "know how it ends" barely stops voicing at all, so the
+  //               last voiced run was the whole phrase and every ending read as
+  //               stretched. Loudness dips at a syllable boundary whether or
+  //               not the voice switches off.
+  //
+  // The verdict is read inside the final syllable alone. Reading it from a
+  // fixed window at the end of the phrase got the common case backwards: a
+  // question-like ending often *steps down* onto the last syllable before
+  // rising through it, so a window spanning the step saw a net fall and called
+  // a rise a landing.
+
+  function findFinalSyllable(pts) {
+    var i, e = -1;
+    for (i = pts.length - 1; i >= 0; i--) { if (pts[i].st != null) { e = i; break; } }
+    if (e < 1) return null;
+    var env = medianFilter(pts, function (p) { return p.rms; }, SMOOTH_HALF_MS);
+
+    // Walk back from the end, tracking the loudest frame seen. The syllable
+    // starts where loudness has fallen to SYLLABLE_DIP of that nucleus. The
+    // running maximum is what makes this survive a final syllable quieter than
+    // the one before it — the threshold is relative to the syllable being
+    // measured, not to the loudest part of the sentence.
+    var pk = env[e], s = e, found = false;
+    for (i = e - 1; i >= 0; i--) {
+      if (pts[e].t - pts[i].t > FINAL_SCAN_MS) break;
+      if (env[i] < pk * SYLLABLE_DIP) { found = true; break; }
+      if (env[i] > pk) pk = env[i];
+      s = i;
+    }
+    // No dip inside the scan window means the ending ran on into the syllable
+    // before it with no boundary to find. The contour is still readable; the
+    // duration is not, and is reported as unknown rather than as the scan
+    // limit, which would be a made-up number that always looked stretched.
+    return { start: pts[s].t, end: pts[e].t, found: found };
+  }
+
+  // Direction of the ending, in semitones, read as the difference between the
+  // medians of its first and last two-fifths. Medians rather than a slope: the
+  // region is short enough that one octave-slip frame swings a regression line,
+  // and the shape being detected is monotonic anyway.
+  function contourDelta(pts, from, to) {
+    if (to - from < CONTOUR_MIN_MS) from = to - CONTOUR_MIN_MS;
+    var v = pts.filter(function (p) { return p.st != null && p.t >= from && p.t <= to; });
+    if (v.length < 4) return null;
+    var span = v[v.length - 1].t - v[0].t;
+    if (span < CONTOUR_MIN_MS / 2) return null;
+    function part(lo, hi) {
+      var w = v.filter(function (p) { return p.t >= v[0].t + span * lo && p.t <= v[0].t + span * hi; });
+      return w.length ? median(w.map(function (p) { return p.st; })) : null;
+    }
+    var a = part(0, 0.4), b = part(0.6, 1);
+    return a == null || b == null ? null : b - a;
+  }
+
+  function buildIntonation() {
+    var html =
+      '<div class="card">' +
+        '<h3>Statement endings — landing the last syllable</h3>' +
+        '<p class="why">Two habits sit on top of pitch and are heard independently of it: holding the ' +
+        'final syllable long, and letting it slide upward. Neither needs your range to move, and ' +
+        'neither costs your voice anything to change. <b>Read the sentence below, then pause for about ' +
+        'a second</b> — the pause is what tells the tool an ending happened.</p>' +
+
+        '<details class="explain"><summary>How to do it, and what is being measured</summary><div>' +
+          '<ol class="steps">' +
+            '<li>Read the sentence, then <b>pause for about a second</b> — the pause is what tells ' +
+              'the tool the sentence ended.</li>' +
+            '<li>Keep the last syllable <i>short</i>, and let the pitch drop onto it.</li>' +
+            '<li>Aim for eight in a row with no rise.</li>' +
+          '</ol>' +
+          '<p class="note">Falling is the target and flat is fine; only a rise counts against you. ' +
+          'Do not fake the fall by shoving the pitch down at the end — drop it and stop, the way you ' +
+          'would if the sentence had simply run out.</p>' +
+          DIAGRAMS.terminal() +
+          '<p class="note">The trace is drawn in semitones around the sentence’s own average, so ' +
+          'it shows the shape of the ending and not where your voice sits — pitch has its own drills. ' +
+          'The shaded part is the final syllable, found from a dip in loudness; the verdict is read ' +
+          'from that syllable alone.</p>' +
+        '</div></details>' +
+
+        '<div class="stack">' +
+          '<div class="prompt"><div class="cnt" id="cnt">sentence 1 of ' + STATEMENTS.length + '</div>' +
+            '<div class="say" id="say">' + STATEMENTS[0] + '</div></div>' +
+          '<canvas id="cont" role="img" aria-label="Pitch contour of the sentence you just read, ' +
+            'with the final syllable highlighted"></canvas>' +
+          '<div class="verdict" id="verdict"><span class="v">—</span>' +
+            '<span class="d">read a sentence, then pause</span></div>' +
+        '</div>' +
+        '<div class="chips" id="chips"></div>' +
+        takeControls('Start take') +
+        '<div id="report"></div>' +
+      '</div>';
+
+    var view, running = false;
+    var pts = [];              // frames of the phrase in progress
+    var frozen = null;         // the last scored phrase, kept on screen
+    var gapMs = 0, lastTs = null;
+    var results = [];
+
+    function setRunning(el, on) {
+      running = on;
+      if (on) {
+        pts = []; results = []; frozen = null;
+        gapMs = 0; lastTs = null;
+        document.getElementById('report').innerHTML = '';
+        setVerdict(null);
+        renderChips();
+        document.getElementById('status').textContent = 'recording — nothing is saved';
+      } else {
+        endPhrase();
+        document.getElementById('status').textContent = '';
+        report();
+      }
+      el.textContent = on ? 'Stop' : 'Start take';
+      el.className = on ? 'recording' : 'primary';
+      redraw();
+    }
+
+    function prompt() {
+      var i = results.length % STATEMENTS.length;
+      document.getElementById('cnt').textContent =
+        'sentence ' + (i + 1) + ' of ' + STATEMENTS.length +
+        (results.length >= STATEMENTS.length ? ' — round ' +
+          (Math.floor(results.length / STATEMENTS.length) + 1) : '');
+      document.getElementById('say').textContent = STATEMENTS[i];
+    }
+
+    function setVerdict(r) {
+      var el = document.getElementById('verdict');
+      if (!r) {
+        el.className = 'verdict';
+        el.innerHTML = '<span class="v">—</span><span class="d">' +
+          (running ? 'read the sentence, then pause' : 'read a sentence, then pause') + '</span>';
+        return;
+      }
+      var word = r.dir === 'rise' ? 'Rose' : r.dir === 'fall' ? 'Landed' : 'Flat';
+      var detail = (r.dir === 'rise' ? 'up ' : r.dir === 'fall' ? 'down ' : 'within ') +
+        Math.abs(r.delta).toFixed(1) + ' semitones across the last syllable';
+      if (r.hold != null) {
+        detail += ' · held ' + r.hold.toFixed(0) + ' ms' +
+          (r.hold > HOLD_LONG_MS ? ' — stretched' : '');
+      } else {
+        detail += ' · length unreadable, it ran into the syllable before it';
+      }
+      el.className = 'verdict ' + (r.dir === 'rise' ? 'warn' : 'good');
+      el.innerHTML = '<span class="v">' + word + '</span><span class="d">' + detail + '</span>';
+    }
+
+    function renderChips() {
+      var landed = results.filter(function (r) { return r.dir !== 'rise'; }).length;
+      var boxes = [];
+      for (var i = 0; i < Math.max(STATEMENTS.length, results.length); i++) {
+        var r = results[i];
+        boxes.push('<span class="chip' + (r ? ' ' + r.dir : '') + '">' +
+          (r ? (r.dir === 'rise' ? '↑' : r.dir === 'fall' ? '↓' : '–') : '') + '</span>');
+      }
+      document.getElementById('chips').innerHTML = boxes.join('') +
+        '<span class="cnt">' + landed + ' of ' + results.length + ' landed</span>';
+    }
+
+    function endPhrase() {
+      var phrase = pts;
+      pts = [];
+      var voiced = phrase.filter(function (p) { return p.st != null; });
+      // A cough, a door, or the tail of the sentence before is not a phrase.
+      if (voiced.length < 4 || voiced[voiced.length - 1].t - voiced[0].t < MIN_PHRASE_MS) return;
+
+      // Score the de-spiked copy; keep the raw one for the drawing, which
+      // smooths it the same way when it draws.
+      var st = medianFilter(phrase, function (p) { return p.st; }, SMOOTH_HALF_MS);
+      var clean = phrase.map(function (p, i) { return { t: p.t, st: st[i], rms: p.rms }; });
+      var syl = findFinalSyllable(clean);
+      if (!syl) return;
+      var delta = contourDelta(clean, syl.start, syl.end);
+      if (delta == null) return;
+
+      var r = {
+        delta: delta,
+        hold: syl.found ? syl.end - syl.start : null,
+        dir: delta >= TERMINAL_ST ? 'rise' : delta <= -TERMINAL_ST ? 'fall' : 'flat',
+        from: Math.min(syl.start, syl.end - CONTOUR_MIN_MS),
+        to: syl.end
+      };
+      results.push(r);
+      // Without trimming, every frozen sentence carries the quarter-second of
+      // silence that ended it and the line stops short of the right edge.
+      while (phrase.length && phrase[phrase.length - 1].st == null) phrase.pop();
+      frozen = { pts: phrase, mark: r };
+      setVerdict(r);
+      renderChips();
+      prompt();
+    }
+
+    // While a sentence is being spoken it draws itself; the moment it ends the
+    // scored version replaces it and stays put, because a contour you cannot
+    // look at afterwards is not feedback.
+    function redraw() {
+      // A sentence in progress is drawn against a fixed span so the line grows
+      // steadily instead of rescaling under you; a finished one is stretched to
+      // the width, since by then its length is known.
+      if (pts.length) view.draw(pts, false, 2200);
+      else if (frozen) view.draw(frozen.pts, frozen.mark, 0);
+      else view.draw(null, running ? false : null);
+    }
+
+    return {
+      html: html,
+      abort: function () {
+        if (running) setRunning(document.getElementById('go'), false);
+      },
+      mount: function () {
+        view = new Contour(document.getElementById('cont'));
+        view.resize();
+        prompt();
+        renderChips();
+        redraw();
+        document.getElementById('go').onclick = function () { setRunning(this, !running); };
+      },
+      frame: function (a, ts) {
+        if (running) {
+          var dt = lastTs == null ? 0 : Math.min(100, ts - lastTs);
+          lastTs = ts;
+          // Raw per-frame pitch, not the shared smoother. That smoother is a
+          // median of five *frames*, which is 83 ms at 60 Hz and over 200 ms on
+          // a slow one — long enough to flatten a final syllable that only
+          // lasts a quarter of a second, and it was attenuating real rises into
+          // "flat". The contour does its own smoothing over a fixed 50 ms
+          // window instead, which the octave-slip test covers.
+          if (a.voiced && a.f0) {
+            gapMs = 0;
+            if (!pts.length) frozen = null;   // a new sentence clears the old one
+            pts.push({ t: ts, st: DSP.hzToSemitones(a.f0), rms: a.rms });
+          } else {
+            gapMs += dt;
+            if (pts.length) {
+              if (gapMs >= PHRASE_GAP_MS) endPhrase();
+              else pts.push({ t: ts, st: null, rms: a.rms });
+            }
+          }
+        }
+        // Redrawn even when stopped, so the scored sentence survives the window
+        // being resized while you are looking at it.
+        redraw();
+      }
+    };
+
+    function report() {
+      var el = document.getElementById('report');
+      if (results.length < 3) {
+        el.innerHTML = '<div class="banner err" style="margin-top:14px">Only ' + results.length +
+          ' sentence' + (results.length === 1 ? '' : 's') + ' scored. Read several, leaving about a ' +
+          'second of silence between them.</div>';
+        return;
+      }
+      var rises = results.filter(function (r) { return r.dir === 'rise'; }).length;
+      var holds = results.filter(function (r) { return r.hold != null; })
+        .map(function (r) { return r.hold; });
+      var longs = holds.filter(function (h) { return h > HOLD_LONG_MS; }).length;
+      el.innerHTML =
+        '<table style="margin-top:16px"><tr><th>Measure</th><th>This take</th><th>Target</th><th></th></tr>' +
+        '<tr><td>Endings that rose</td><td class="num">' + rises + ' of ' + results.length +
+          '</td><td class="num">0</td><td class="' + (rises === 0 ? 'ok' : 'no') + '">' +
+          (rises === 0 ? 'on target' : 'keep working') + '</td></tr>' +
+        (holds.length
+          ? '<tr><td>Median final syllable</td><td class="num">' + median(holds).toFixed(0) +
+            ' ms</td><td class="num">under ' + HOLD_LONG_MS + ' ms</td><td class="' +
+            (longs === 0 ? 'ok' : 'no') + '">' + (longs === 0 ? 'on target' : longs + ' stretched') +
+            '</td></tr>'
+          : '<tr><td>Median final syllable</td><td class="num">—</td><td class="num">under ' +
+            HOLD_LONG_MS + ' ms</td><td>no clean boundary found</td></tr>') +
+        '</table>' +
+        '<div class="hint">Not saved to <b>Progress</b>: this is a shape rather than a level, and it ' +
+        'only means anything against the sentences on this page. The transfer test is whether the ' +
+        'endings still land in <b>Free speech</b>, where nothing is prompting you.</div>';
+    }
+  }
+
+  // --- reading passage ------------------------------------------------------
+
+  function buildPassage() {
+    var html =
+      '<div class="card">' +
+        '<h3>Reading passage</h3>' +
+        '<p class="why">Connected speech is the real test. Resonance is only meaningful when averaged ' +
+        'over many vowels, so this take is compared against your calibration reading of the same ' +
+        'passage — like for like.</p>' +
+        // The text you are reading and the trace of you reading it belong to
+        // each other, so they share one bordered block rather than two cards.
+        '<div class="stack">' +
+          '<div class="prompt"><div class="cnt">read aloud</div>' +
+            '<div class="say" style="font-size:16.5px;line-height:1.7">' + PASSAGE + '</div></div>' +
+          '<canvas id="rib" role="img" aria-label="Live pitch trace"></canvas>' +
+        '</div>' +
+        '<div class="meters">' + meter('m-pitch', 'Pitch', '', true) + meter('m-res', 'Resonance', '', true) +
+          meter('m-weight', 'Weight') + meter('m-int', 'Intonation') + '</div>' +
+        takeControls('Start take') +
+        '<div id="report"></div>' +
+      '</div>';
+
+    var rib, running = false, f0s = [], resList = [], weights = [], band = null;
+    var voicedMs = 0, lastTs = null;
+
+    function setRunning(el, on, score) {
+      running = on;
+      el.textContent = on ? 'Stop and score' : 'Start take';
+      el.className = on ? 'recording' : 'primary';
+      if (on) {
+        f0s = []; resList = []; weights = []; rib.pts = [];
+        voicedMs = 0; lastTs = null;
+        intonation.reset();
+        document.getElementById('report').innerHTML = '';
+        document.getElementById('status').textContent = 'recording — audio is never saved';
+      } else {
+        document.getElementById('status').textContent = '';
+        if (score) report();
+      }
+    }
+
+    return {
+      html: html,
+      abort: function () {
+        if (running) setRunning(document.getElementById('go'), false, true);
+      },
+      mount: function () {
+        rib = new Ribbon(document.getElementById('rib'));
+        rib.resize();
+        band = targetBand();
+        rib.draw(band);
+        document.getElementById('go').onclick = function () { setRunning(this, !running, true); };
+      },
+      frame: function (a) {
+        var f0 = smoothF0.value();
+        var res = smoothRes.value();
+        setMeter('m-pitch', f0 ? f0.toFixed(0) + ' Hz' : '--',
+          band ? 'target ' + band.center.toFixed(0) : '',
+          { hit: band && f0 && f0 >= band.lo && f0 <= band.hi,
+            fill: f0 ? pitchFill(f0) : 0, markAt: band ? pitchFill(band.center) : null });
+        setMeter('m-res', res ? res.toFixed(1) + ' cm' : '--', resonanceSub(res), resonanceMeterOpts(res));
+        setMeter('m-weight', weightLabel(smoothWeight.value()), weightSub(smoothWeight.value()));
+        var sd = intonation.sd();
+        setMeter('m-int', sd != null ? sd.toFixed(1) + ' st' : '--', 'flatter reads more masculine');
+        if (running) {
+          var dt = lastTs == null ? 0 : Math.min(100, performance.now() - lastTs);
+          lastTs = performance.now();
+          if (a.voiced && f0) {
+            voicedMs += dt;
+            f0s.push(f0);
+            if (a.resonance != null) resList.push(a.resonance);
+            if (a.weightRaw != null) weights.push(a.weightRaw);
+          }
+          rib.push(a.voiced ? f0 : 0);
+          rib.draw(band);
+        }
+      }
+    };
+
+    function report() {
+      if (voicedMs < MIN_VOICED_MS_SCORE) {
+        document.getElementById('report').innerHTML =
+          '<div class="banner err" style="margin-top:14px">Only ' + (voicedMs / 1000).toFixed(1) +
+          ' s of voiced speech — too little to score. Read the whole passage.</div>';
+        return;
+      }
+      var mF0 = median(f0s);
+      var mRes = resList.length >= MIN_FRAMES_FOR_MEDIAN ? median(resList) : null;
+      var mW = weights.length >= MIN_FRAMES_FOR_MEDIAN ? median(weights) : null;
+      var sd = semitoneSd(f0s);
+      var rows = [];
+      function line(name, val, target, good) {
+        rows.push('<tr><td>' + name + '</td><td class="num">' + val + '</td><td class="num">' + target +
+          '</td><td class="' + (good ? 'ok' : 'no') + '">' + (good ? 'on target' : 'keep working') + '</td></tr>');
+      }
+      var t = pitchTarget();
+      line('Pitch', mF0.toFixed(0) + ' Hz', t ? t.hz.toFixed(0) + ' Hz' : '—', t && mF0 <= t.hz * 1.06);
+      if (mRes != null && base.resonance != null) {
+        line('Resonance', mRes.toFixed(1) + ' cm', (base.resonance * RESONANCE_GOAL).toFixed(1) + ' cm',
+          mRes >= base.resonance * RESONANCE_GOAL);
+      }
+      if (mW != null && base.weight != null) {
+        line('Weight', (mW - base.weight >= 0 ? '+' : '') + (mW - base.weight).toFixed(1),
+          'at or above baseline', mW >= base.weight);
+      }
+      if (sd != null && base.intonationSd != null) {
+        line('Intonation', sd.toFixed(1) + ' st', '≤ ' + base.intonationSd.toFixed(1) + ' st', sd <= base.intonationSd);
+      }
+      recordTake('passage', { f0: mF0, res: mRes, weight: mW, sd: sd });
+      document.getElementById('report').innerHTML =
+        '<table style="margin-top:16px"><tr><th>Measure</th><th>This take</th><th>Target</th><th></th></tr>' +
+        rows.join('') + '</table>' +
+        '<div class="hint">Compared against your own calibration on this same passage, so vowel content ' +
+        'matches. Resonance measured on a different text is not comparable. ' +
+        'Saved to <b>Progress</b>.</div>';
+    }
+  }
+
+  // --- free speech ----------------------------------------------------------
+
+  function buildFree() {
+    var html =
+      '<div class="card">' +
+        '<h3>Free speech</h3>' +
+        '<p class="why">Live meters are useful for drilling and actively harmful for conversation — ' +
+        'watching a number pulls you out of speaking. Talk for a minute about anything, with nothing ' +
+        'to look at, and read the result afterwards.</p>' +
+        takeControls('Start talking') +
+        '<div id="report"></div>' +
+      '</div>';
+
+    var running = false, f0s = [], resList = [], weights = [], t0 = 0;
+    var voicedMs = 0, lastTs = null;
+
+    function setRunning(el, on) {
+      running = on;
+      el.textContent = on ? 'Stop and score' : 'Start talking';
+      el.className = on ? 'recording' : 'primary';
+      if (on) {
+        f0s = []; resList = []; weights = []; t0 = performance.now();
+        voicedMs = 0; lastTs = null;
+        intonation.reset();
+        document.getElementById('report').innerHTML = '';
+      } else {
+        document.getElementById('status').textContent = '';
+        report();
+      }
+    }
+
+    return {
+      html: html,
+      abort: function () {
+        if (running) setRunning(document.getElementById('go'), false);
+      },
+      mount: function () {
+        document.getElementById('go').onclick = function () { setRunning(this, !running); };
+      },
+      frame: function (a, ts) {
+        if (!running) return;
+        var f0 = smoothF0.value();
+        var dt = lastTs == null ? 0 : Math.min(100, ts - lastTs);
+        lastTs = ts;
+        if (a.voiced && f0) {
+          voicedMs += dt;
+          f0s.push(f0);
+          if (a.resonance != null) resList.push(a.resonance);
+          if (a.weightRaw != null) weights.push(a.weightRaw);
+        }
+        document.getElementById('status').textContent =
+          ((performance.now() - t0) / 1000).toFixed(0) + ' s — no meters on purpose';
+      }
+    };
+
+    function report() {
+      if (voicedMs < MIN_VOICED_MS_SCORE) {
+        document.getElementById('report').innerHTML =
+          '<div class="banner err" style="margin-top:14px">Only ' + (voicedMs / 1000).toFixed(1) +
+          ' s of voiced speech — too little to score. Talk for a bit longer.</div>';
+        return;
+      }
+      var mF0 = median(f0s), sd = semitoneSd(f0s);
+      var mRes = resList.length >= MIN_FRAMES_FOR_MEDIAN ? median(resList) : null;
+      var mW = weights.length >= MIN_FRAMES_FOR_MEDIAN ? median(weights) : null;
+      var t = pitchTarget();
+      recordTake('free', { f0: mF0, res: mRes, weight: mW, sd: sd });
+      var html = '<table style="margin-top:16px"><tr><th>Measure</th><th>This take</th><th>Reference</th></tr>' +
+        '<tr><td>Median pitch</td><td class="num">' + mF0.toFixed(0) + ' Hz</td><td class="num">target ' +
+          (t ? t.hz.toFixed(0) : '—') + ' Hz</td></tr>' +
+        (mRes != null ? '<tr><td>Resonance</td><td class="num">' + mRes.toFixed(1) + ' cm</td><td class="num">baseline ' +
+          (base.resonance != null ? base.resonance.toFixed(1) : '—') + ' cm</td></tr>' : '') +
+        (mW != null && base.weight != null ? '<tr><td>Weight</td><td class="num">' +
+          (mW - base.weight >= 0 ? '+' : '') + (mW - base.weight).toFixed(1) + '</td><td class="num">baseline</td></tr>' : '') +
+        (sd != null ? '<tr><td>Intonation</td><td class="num">' + sd.toFixed(1) + ' st</td><td class="num">baseline ' +
+          (base.intonationSd != null ? base.intonationSd.toFixed(1) : '—') + ' st</td></tr>' : '') +
+        '</table>' +
+        '<div class="hint">Spontaneous speech usually sits higher than drilled speech. That gap is the ' +
+        'real measure of how far the training has carried. Saved to <b>Progress</b>.</div>';
+      document.getElementById('report').innerHTML = html;
+    }
+  }
+
+  // --- progress -------------------------------------------------------------
+
+  // What each chart plots, and what counts as "better". Resonance is restricted
+  // to the passage takes because it is only comparable across the same text —
+  // the same reason the passage report compares against the calibration read.
+  function progressMetrics() {
+    var t = pitchTarget();
+    return [
+      { id: 'f0', label: 'Pitch', unit: ' Hz', dp: 0, lower: true,
+        ref: t ? t.hz : null, refLabel: 'target' },
+      { id: 'res', label: 'Resonance', unit: ' cm', dp: 1, lower: false,
+        ref: base.resonance != null ? base.resonance * RESONANCE_GOAL : null, refLabel: 'goal',
+        passageOnly: true },
+      { id: 'sd', label: 'Intonation', unit: ' st', dp: 1, lower: true,
+        ref: base.intonationSd, refLabel: 'baseline' },
+      { id: 'weight', label: 'Weight', unit: '', dp: 1, lower: false,
+        ref: base.weight, refLabel: 'baseline' }
+    ];
+  }
+
+  var KIND_LABEL = { calibration: 'Calibration', passage: 'Passage', free: 'Free speech' };
+  var KIND_COLOR = { calibration: '#8f97ad', passage: '#6ea8ff', free: '#f0b45e' };
+
+  function buildProgress() {
+    var metrics = progressMetrics().filter(function (m) {
+      return history.some(function (h) { return h[m.id] != null; });
+    });
+    if (!metrics.length) {
+      return {
+        html:
+          '<div class="card">' +
+            '<h3>Progress</h3>' +
+            '<p class="why">Scored takes are kept in this browser so you can see whether the numbers ' +
+            'are actually moving. Nothing here is uploaded, and no audio is stored — only the four ' +
+            'medians and the date.</p>' +
+            '<div class="banner info" style="margin:0">No scored takes yet. The <b>reading passage</b> ' +
+            'and <b>free speech</b> exercises each save one take when you press <i>Stop and score</i>; ' +
+            'your calibration reading is saved as the first point.</div>' +
+          '</div>'
+      };
+    }
+
+    var sel = metrics[0].id;
+
+    var html =
+      '<div class="card">' +
+        '<h3>Progress</h3>' +
+        '<p class="why">Every scored take, oldest first. Practice moves slowly and unevenly — a single ' +
+        'take says almost nothing, and the line across a few weeks says everything. Nothing here is ' +
+        'uploaded; only the medians and the date are kept, in this browser.</p>' +
+        '<div class="row" id="metricRow" style="margin-top:0">' +
+          metrics.map(function (m) {
+            return '<button data-metric="' + m.id + '"' + (m.id === sel ? ' class="primary"' : '') +
+              '>' + m.label + '</button>';
+          }).join('') +
+        '</div>' +
+        '<canvas id="progCanvas" class="trace" style="height:230px;margin-top:14px" role="img" ' +
+          'aria-label="Scored takes over time"></canvas>' +
+        '<div id="progSummary" class="hint"></div>' +
+      '</div>' +
+      '<div class="card">' +
+        '<h3 style="font-size:15px">Takes</h3>' +
+        '<div style="max-height:340px;overflow:auto">' + takeTable() + '</div>' +
+        '<div class="row"><button id="clearHist">Delete take history</button>' +
+          '<span style="color:var(--dim);font-size:12.5px">Your calibration is kept.</span></div>' +
+      '</div>';
+
+    var cv, g, onResize = null;
+
+    function series(m) {
+      return history.filter(function (h) {
+        return h[m.id] != null && !(m.passageOnly && h.kind === 'free');
+      });
+    }
+
+    function draw() {
+      var m = metrics.filter(function (x) { return x.id === sel; })[0];
+      var pts = series(m);
+      var r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      if (cv.width !== Math.round(r.width * dpr)) {
+        cv.width = r.width * dpr; cv.height = r.height * dpr;
+        g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+      var w = r.width, h = r.height;
+      g.clearRect(0, 0, w, h);
+      g.fillStyle = '#0e1016'; g.fillRect(0, 0, w, h);
+      g.font = '11px system-ui';
+
+      if (!pts.length) {
+        g.fillStyle = 'rgba(143,151,173,.8)';
+        g.fillText('No takes with a ' + m.label.toLowerCase() + ' reading yet.', 10, h / 2);
+        document.getElementById('progSummary').textContent = '';
+        return;
+      }
+
+      // The reference line is part of the picture, so the scale has to include
+      // it — a chart that crops the target off the top implies you are there.
+      var vals = pts.map(function (p) { return p[m.id]; });
+      var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+      if (m.ref != null) { lo = Math.min(lo, m.ref); hi = Math.max(hi, m.ref); }
+      var pad = (hi - lo) * 0.18 || Math.max(Math.abs(hi) * 0.05, 0.5);
+      lo -= pad; hi += pad;
+
+      var padL = 46, padR = 12, padT = 12, padB = 22;
+      function x(i) {
+        return pts.length === 1 ? padL + (w - padL - padR) / 2
+          : padL + i / (pts.length - 1) * (w - padL - padR);
+      }
+      function y(v) { return padT + (1 - (v - lo) / (hi - lo)) * (h - padT - padB); }
+
+      // y axis
+      g.strokeStyle = 'rgba(46,52,70,.9)'; g.lineWidth = 1;
+      g.fillStyle = 'rgba(143,151,173,.75)';
+      [lo + pad, (lo + hi) / 2, hi - pad].forEach(function (v) {
+        var yy = Math.round(y(v)) + 0.5;
+        g.beginPath(); g.moveTo(padL, yy); g.lineTo(w - padR, yy); g.stroke();
+        g.fillText(v.toFixed(m.dp), 6, yy + 4);
+      });
+
+      if (m.ref != null) {
+        var yr = y(m.ref);
+        g.strokeStyle = 'rgba(90,211,154,.55)'; g.setLineDash([4, 4]);
+        g.beginPath(); g.moveTo(padL, yr); g.lineTo(w - padR, yr); g.stroke();
+        g.setLineDash([]);
+        g.fillStyle = 'rgba(90,211,154,.9)';
+        var lbl = m.refLabel + ' ' + m.ref.toFixed(m.dp) + m.unit;
+        g.fillText(lbl, w - padR - g.measureText(lbl).width, yr - 5);
+      }
+
+      g.strokeStyle = 'rgba(110,168,255,.75)'; g.lineWidth = 2;
+      g.beginPath();
+      pts.forEach(function (p, i) {
+        var xx = x(i), yy = y(p[m.id]);
+        if (i) g.lineTo(xx, yy); else g.moveTo(xx, yy);
+      });
+      g.stroke();
+
+      pts.forEach(function (p, i) {
+        g.fillStyle = KIND_COLOR[p.kind] || '#6ea8ff';
+        g.beginPath(); g.arc(x(i), y(p[m.id]), 3.5, 0, Math.PI * 2); g.fill();
+      });
+
+      g.fillStyle = 'rgba(143,151,173,.75)';
+      g.fillText(shortDate(pts[0].t), padL, h - 6);
+      if (pts.length > 1) {
+        var last = shortDate(pts[pts.length - 1].t);
+        g.fillText(last, w - padR - g.measureText(last).width, h - 6);
+      }
+
+      summarise(m, pts);
+    }
+
+    // Change since the first take, stated in the direction that is actually an
+    // improvement for the metric — "down 11 Hz" is progress, "down 0.4 cm" is not.
+    function summarise(m, pts) {
+      var el = document.getElementById('progSummary');
+      if (pts.length < 2) {
+        el.innerHTML = 'One take so far. A second one gives you a line.';
+        return;
+      }
+      var first = pts[0][m.id], last = pts[pts.length - 1][m.id];
+      var d = last - first;
+      var better = m.lower ? d < 0 : d > 0;
+      var word = Math.abs(d) < Math.pow(10, -m.dp) / 2 ? 'unchanged' :
+        (better ? 'toward your goal' : 'away from your goal');
+      el.innerHTML = pts.length + ' takes since ' + shortDate(pts[0].t) + '. ' +
+        m.label + ' ' + (d >= 0 ? '+' : '') + d.toFixed(m.dp) + m.unit +
+        ' <span class="' + (word === 'unchanged' ? '' : better ? 'ok' : 'no') + '">' + word + '</span>' +
+        (m.passageOnly ? ' — free-speech takes are left out, since resonance only compares on the same text.' : '');
+    }
+
+    return {
+      html: html,
+      mount: function () {
+        cv = document.getElementById('progCanvas');
+        g = cv.getContext('2d');
+        draw();
+        Array.prototype.forEach.call(document.querySelectorAll('#metricRow button'), function (b) {
+          b.onclick = function () {
+            sel = b.dataset.metric;
+            Array.prototype.forEach.call(document.querySelectorAll('#metricRow button'), function (o) {
+              o.className = o === b ? 'primary' : '';
+            });
+            draw();
+          };
+        });
+        document.getElementById('clearHist').onclick = function () {
+          if (!confirm('Delete all ' + history.length + ' saved takes? Your calibration is kept.')) return;
+          clearHistory();
+          openExercise('progress');
+        };
+        onResize = function () { draw(); };
+        window.addEventListener('resize', onResize);
+      },
+      abort: function () {
+        if (onResize) window.removeEventListener('resize', onResize);
+        onResize = null;
+      }
+    };
+  }
+
+  function takeTable() {
+    var t = pitchTarget();
+    var rows = history.slice().reverse().map(function (h) {
+      function cell(v, dp, unit) {
+        return '<td class="num">' + (v == null ? '—' : v.toFixed(dp) + unit) + '</td>';
+      }
+      return '<tr><td class="num">' + shortDate(h.t) + '</td>' +
+        '<td>' + (KIND_LABEL[h.kind] || h.kind) + '</td>' +
+        '<td class="num' + (t && h.f0 != null && h.f0 <= t.hz * 1.06 ? ' ok' : '') + '">' +
+          (h.f0 == null ? '—' : h.f0.toFixed(0) + ' Hz') + '</td>' +
+        cell(h.res, 1, ' cm') +
+        cell(h.sd, 1, ' st') +
+        (h.weight != null && base.weight != null
+          ? '<td class="num">' + (h.weight - base.weight >= 0 ? '+' : '') +
+            (h.weight - base.weight).toFixed(1) + '</td>'
+          : '<td class="num">—</td>') +
+        '</tr>';
+    });
+    return '<table><tr><th>When</th><th>Take</th><th>Pitch</th><th>Resonance</th>' +
+      '<th>Intonation</th><th>Weight</th></tr>' + rows.join('') + '</table>';
+  }
+
+  function shortDate(ms) {
+    var d = new Date(ms);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
+      d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+
+  // ==========================================================================
+  // boot
+  // ==========================================================================
+
+  document.getElementById('micBtn').onclick = function () {
+    if (audio.running) stopMic(); else startMic();
+  };
+  document.getElementById('resetBtn').onclick = function () {
+    // Old takes are scored against the old baseline, so keeping them across a
+    // recalibration would put two different reference frames on one chart.
+    if (!confirm('Clear your saved baseline, targets, and all ' + history.length +
+      ' saved takes?')) return;
+    base = {};
+    try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+    clearHistory();
+    save();
+    openExercise('calibrate');
+  };
+  renderBaseTable();
+  renderExList();
+  openExercise(base.habitualF0 == null ? 'calibrate' : 'straw');
+})();
+</script>
