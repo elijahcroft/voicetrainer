@@ -1,5 +1,5 @@
 <!--
-  voice-trainer.html — voice masculinization practice with live acoustic feedback.
+  index.html — voice masculinization practice with live acoustic feedback.
 
   Open this file directly in Chrome (File > Open, or drag it in). Nothing is
   installed, nothing is uploaded, and no audio is recorded or stored — every
@@ -9,7 +9,7 @@
 
   If the microphone will not start from file://, serve the folder instead:
       python3 -m http.server
-  then open http://localhost:8000/voice-trainer.html
+  then open http://localhost:8000/index.html
 
   The DSP lives in dsp.js and is verified by test-dsp.mjs (node test-dsp.mjs).
   The statement-endings measurement is verified by test-endings.mjs, which pulls
@@ -18,7 +18,14 @@
 -->
 <meta charset="utf-8">
 <title>Voice Trainer</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#12141a">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Voice">
 <script src="dsp.js"></script>
 <style>
   :root {
@@ -221,6 +228,13 @@
   .explain > summary:hover { color: var(--text); }
   .explain > div { padding-top: 12px; }
   code { font-family: var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: .92em; }
+
+  /* Installed on a phone the page owns the whole screen, notch and home bar
+     included, so keep the sticky header and the last row clear of both. */
+  header { padding-top: calc(12px + env(safe-area-inset-top));
+           padding-left: calc(20px + env(safe-area-inset-left));
+           padding-right: calc(20px + env(safe-area-inset-right)); }
+  .layout { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
 </style>
 
 <header>
@@ -358,7 +372,7 @@
     } catch (e) {
       showError('Could not open the microphone (' + e.name + '). Grant permission, or if you opened ' +
         'this as a file, run <code>python3 -m http.server</code> in this folder and use ' +
-        '<code>http://localhost:8000/voice-trainer.html</code> instead.');
+        '<code>http://localhost:8000/</code> instead.');
       return;
     }
     audio.ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -2488,4 +2502,14 @@
   renderExList();
   openExercise(base.habitualF0 == null ? 'calibrate' : 'straw');
 })();
+</script>
+
+<script>
+  // Installable + offline. Service workers are unavailable over file://, which
+  // is still a perfectly good way to open this page, so the failure is silent.
+  if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+    addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    });
+  }
 </script>

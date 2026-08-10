@@ -35,15 +35,15 @@ and that is invisible in a bare URL.
 
 | Constant | Value | Lives in | Why | Evidence |
 |---|---|---|---|---|
-| `MASC_F0_CEILING` | 130 Hz | `voice-trainer.html` | Below this, listeners reliably hear "male" | §2 — Moderate |
-| `ANDROGYNOUS_LOW` | 140 Hz | `voice-trainer.html` | Bottom of the ambiguous band | §2 — Moderate |
-| `ANDROGYNOUS_HIGH` | 165 Hz | `voice-trainer.html` | Top of the ambiguous band | §2 — Moderate |
-| `RESONANCE_GOAL` | ×1.10 | `voice-trainer.html` | Bottom of the 10–20% cis-male tract-length range | §3 — Strong |
-| `FLOOR_MARGIN_ST` | 3 semitones | `voice-trainer.html` | Never target this close to the bottom of a range | §4 — Weak (deliberately conservative) |
-| `TERMINAL_ST` | 1.0 semitone | `voice-trainer.html` | Below this, a phrase ending is called flat rather than rising or falling | §5 — Weak (judgement call) |
-| `HOLD_LONG_MS` | 350 ms | `voice-trainer.html` | Final syllable longer than this is flagged as stretched | §5 — Weak (judgement call) |
-| `SYLLABLE_DIP` | 0.5 | `voice-trainer.html` | Loudness dip, relative to the nucleus, that marks where the final syllable starts | §5 — Verified here |
-| `SMOOTH_HALF_MS` | 25 ms | `voice-trainer.html` | Median window for the contour and the loudness envelope | §5 — Verified here |
+| `MASC_F0_CEILING` | 130 Hz | `index.html` | Below this, listeners reliably hear "male" | §2 — Moderate |
+| `ANDROGYNOUS_LOW` | 140 Hz | `index.html` | Bottom of the ambiguous band | §2 — Moderate |
+| `ANDROGYNOUS_HIGH` | 165 Hz | `index.html` | Top of the ambiguous band | §2 — Moderate |
+| `RESONANCE_GOAL` | ×1.10 | `index.html` | Bottom of the 10–20% cis-male tract-length range | §3 — Strong |
+| `FLOOR_MARGIN_ST` | 3 semitones | `index.html` | Never target this close to the bottom of a range | §4 — Weak (deliberately conservative) |
+| `TERMINAL_ST` | 1.0 semitone | `index.html` | Below this, a phrase ending is called flat rather than rising or falling | §5 — Weak (judgement call) |
+| `HOLD_LONG_MS` | 350 ms | `index.html` | Final syllable longer than this is flagged as stretched | §5 — Weak (judgement call) |
+| `SYLLABLE_DIP` | 0.5 | `index.html` | Loudness dip, relative to the nucleus, that marks where the final syllable starts | §5 — Verified here |
+| `SMOOTH_HALF_MS` | 25 ms | `index.html` | Median window for the contour and the loudness envelope | §5 — Verified here |
 | LPC order | 20 | `dsp.js` | Textbook order 14 cannot cover 0–6 kHz here | §7 — Verified here |
 | Formant-gate tolerance | see `estimateVTL()` | `dsp.js` | Rejects frames where a formant is missing or spurious | §7 — Verified here |
 

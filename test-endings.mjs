@@ -1,7 +1,7 @@
 // test-endings.mjs — the statement-endings measurement, against synthetic
 // sentences of known shape.  Run: node test-endings.mjs
 //
-// The measurement lives in voice-trainer.html because it is bound up with the
+// The measurement lives in index.html because it is bound up with the
 // exercise UI, so this pulls the four functions it needs out of that file
 // rather than keeping a copy that could drift away from what ships.  The
 // synthetic sentences are the cases the first version of this drill got wrong:
@@ -11,7 +11,7 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
-const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'voice-trainer.html'), 'utf8');
+const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'index.html'), 'utf8');
 
 function grab(name, kind = 'function') {
   const start = html.indexOf(`${kind} ${name}(`);

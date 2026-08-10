@@ -1,7 +1,7 @@
 /* dsp.js — pure DSP for the voice trainer.
  *
  * No DOM, no Web Audio, no side effects. Loaded as a classic <script> by
- * voice-trainer.html and imported by test-dsp.mjs so the hard parts can be
+ * index.html and imported by test-dsp.mjs so the hard parts can be
  * verified against synthetic signals without a microphone.
  *
  * See RESEARCH.md for where the acoustic constants come from.
