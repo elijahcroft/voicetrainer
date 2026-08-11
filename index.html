@@ -355,6 +355,7 @@
   .banner.err { background: rgba(255,84,112,.08); border-color: rgba(255,84,112,.35); border-left-color: var(--bad); color: #ffb0bf; }
 
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+  .tscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
   .passage {
     background: var(--well); border-radius: 4px; padding: 16px 18px;
     font-size: 16.5px; line-height: 1.8; border: 1px solid var(--rule);
@@ -523,15 +524,27 @@
     .meters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
     .meter { padding: 10px 11px 12px; }
     .meter .val { font-size: 22px; }
-    /* Five columns of takes cannot fit 390px, so the table scrolls inside its
-       own box rather than dragging the whole page sideways. */
     table { font-size: 13px; }
     td, th { padding: 7px 8px; }
+    /* Six columns of takes cannot fit 390px. Bleed the scroller to the card's
+       edges so the row that is cut off is visibly cut off, not just clipped. */
+    .tscroll { margin-left: -14px; margin-right: -14px; padding: 0 14px; }
+    .tscroll table { min-width: 460px; }
     /* Buttons in an action row span the width and stack. Sizing them by class
        instead would move them under the thumb mid-take, since a running take
        swaps .primary for .recording. */
     .row { gap: 8px; }
     .row > button { flex: 1 1 100%; }
+    /* An exercise card is taller than a phone screen, so the control that
+       starts and stops the take would sit off the bottom while you are
+       watching the trace. Sticky rather than fixed: it rides at the bottom of
+       the screen for as long as its own card is on it, and nowhere else. */
+    .row.take {
+      position: sticky; bottom: calc(6px + env(safe-area-inset-bottom)); z-index: 15;
+      margin: 16px -14px -6px; padding: 9px 14px 6px;
+      background: var(--ink-2); border-top: 1px solid var(--rule);
+    }
+    .row.take #status { flex: 1 1 100%; }
     /* The metric picker is a set of equal choices, not an action row. */
     #metricRow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
@@ -550,6 +563,7 @@
   <nav aria-label="Practice exercises">
     <h2>Practice</h2>
     <div id="exList"></div>
+    <p class="locked-note" id="lockedNote" hidden>Practice unlocks once you have calibrated — the targets are all derived from your own voice.</p>
   </nav>
 
   <aside class="numbers">
@@ -1919,10 +1933,31 @@
         (done && progress.done[e.id] != null
           ? '<span class="xpb" aria-hidden="true">+' + progress.done[e.id] + '</span>' : '') +
         '</button>';
-    }).join('') + (calibrated ? '' :
-      '<p class="locked-note">Practice unlocks once you have calibrated — the targets are all derived from your own voice.</p>');
+    }).join('');
+    // Outside the list: on a phone the list is a horizontal scroller, and a
+    // paragraph inside it becomes a 50px-wide flex item 200px tall.
+    document.getElementById('lockedNote').hidden = calibrated;
     Array.prototype.forEach.call(document.querySelectorAll('.ex'), function (b) {
       b.onclick = function () { openExercise(b.dataset.id); };
+    });
+    revealStep();
+  }
+
+  // On a phone the list is a horizontal strip, so the step you are on scrolls
+  // off its right edge as the routine advances and the strip keeps showing
+  // work you have already finished.
+  function revealStep() {
+    var list = document.getElementById('exList');
+    if (list.scrollWidth <= list.clientWidth) return;
+    var el = list.querySelector('.ex.active') || list.querySelector('.ex.next');
+    if (!el) return;
+    var left = list.scrollLeft + el.getBoundingClientRect().left -
+      list.getBoundingClientRect().left - 12;
+    left = Math.max(0, left);
+    if (Math.abs(left - list.scrollLeft) < 4) return;
+    list.scrollTo({
+      left: left,
+      behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
     });
   }
 
@@ -2257,7 +2292,7 @@
   // Shared start/stop row. The button is inert without a microphone rather than
   // erroring on click.
   function takeControls(label, extra) {
-    return '<div class="row">' +
+    return '<div class="row take">' +
       '<button id="go" class="primary" data-needs-mic>' + label + '</button>' +
       (extra || '') +
       '<span id="status" style="color:var(--dim);font-size:13px"></span>' +
@@ -2466,7 +2501,7 @@
           '<div class="passage">' + PASSAGE + '</div>' +
           '<div class="meters">' + meter('c-f0', 'Pitch') + meter('c-res', 'Resonance') +
             meter('c-n', 'Voiced speech', '', true) + '</div>' +
-          '<div class="row"><button id="calGo" class="primary" data-needs-mic>Start reading</button>' +
+          '<div class="row take"><button id="calGo" class="primary" data-needs-mic>Start reading</button>' +
           '<span id="calStatus" style="color:var(--dim);font-size:13px"></span></div>' + micHint();
         document.getElementById('calGo').onclick = toggle;
       } else if (stage === 1) {
@@ -2477,7 +2512,7 @@
           'is the lowest note that still sounds clear and takes no effort. Do it three or four times.</p>' +
           explainer({ summary: 'What counts as the bottom of your range', diagram: DIAGRAMS.glide }) +
           '<div class="meters">' + meter('c-f0', 'Pitch') + meter('c-low', 'Lowest clear') + '</div>' +
-          '<div class="row"><button id="calGo" class="primary" data-needs-mic>Start glides</button>' +
+          '<div class="row take"><button id="calGo" class="primary" data-needs-mic>Start glides</button>' +
           '<span id="calStatus" style="color:var(--dim);font-size:13px"></span></div>' + micHint();
         document.getElementById('calGo').onclick = toggle;
       } else {
@@ -2500,7 +2535,7 @@
               'a smooth gradient, which is why crossing it buys more than the same drop elsewhere.'
           }) +
           interpretation(t) +
-          '<div class="row"><button id="calDone" class="primary">Start practising</button></div>';
+          '<div class="row take"><button id="calDone" class="primary">Start practising</button></div>';
         document.getElementById('calDone').onclick = function () { openExercise('straw'); };
       }
     }
@@ -3450,8 +3485,10 @@
           : '<td class="num">—</td>') +
         '</tr>';
     });
-    return '<table><tr><th>When</th><th>Take</th><th>Pitch</th><th>Resonance</th>' +
-      '<th>Intonation</th><th>Weight</th></tr>' + rows.join('') + '</table>';
+    // Six columns do not fit a phone; the table scrolls inside its own box
+    // rather than dragging the page sideways.
+    return '<div class="tscroll"><table><tr><th>When</th><th>Take</th><th>Pitch</th><th>Resonance</th>' +
+      '<th>Intonation</th><th>Weight</th></tr>' + rows.join('') + '</table></div>';
   }
 
   function shortDate(ms) {
