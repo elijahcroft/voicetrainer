@@ -3,83 +3,217 @@
 
   Open this file directly in Chrome (File > Open, or drag it in). Nothing is
   installed, nothing is uploaded, and no audio is recorded or stored — every
-  frame is analysed and discarded. Only your calibration numbers and the scores
-  of each take — four medians and a date — are saved, in this browser's
-  localStorage.
+  frame is analysed and discarded. Only your calibration numbers, the scores of
+  each take — four medians and a date — and your streak are saved, in this
+  browser's localStorage.
 
   If the microphone will not start from file://, serve the folder instead:
       python3 -m http.server
   then open http://localhost:8000/index.html
 
   The DSP lives in dsp.js and is verified by test-dsp.mjs (node test-dsp.mjs).
-  The statement-endings measurement is verified by test-endings.mjs, which pulls
-  its functions out of this file so the two cannot drift apart.
+  The statement-endings measurement is verified by test-endings.mjs, and the
+  streak and unlock rules by test-progress.mjs; both pull their functions out of
+  this file so the tests and what ships cannot drift apart.
   See RESEARCH.md for the studies behind the targets.
 -->
 <meta charset="utf-8">
 <title>Voice Trainer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#12141a">
+<meta name="theme-color" content="#08080c">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Voice">
 <script src="dsp.js"></script>
 <style>
+  /* ------------------------------------------------------------------------
+     Look: a spectrogram.
+
+     The field is the near-black floor of an analysis window, every surface is
+     flat and matte, and the only colour in the entire interface is the energy
+     ramp a spectrogram uses — magenta where there is little, amber where it
+     peaks. That ramp is not decoration: it is the state. Off your target reads
+     magenta, on target reads amber, and it means the same thing on the live
+     trace, the meter bars, the ending chips and the progress dots. Everything
+     else is graphite, so the one thing that carries colour is your voice.
+
+     Labels are monospaced small-caps because this is an instrument, and the
+     numbers are the point; headings are the only place with any weight to them.
+     ------------------------------------------------------------------------ */
   :root {
-    --bg: #12141a;
-    --panel: #1a1d26;
-    --panel-2: #222634;
-    --line: #2e3446;
-    --text: #e6e9f2;
-    --dim: #8f97ad;
-    --accent: #6ea8ff;
-    --good: #5ad39a;
-    --warn: #f0b45e;
-    --bad: #ef6f6f;
+    --ink: #08080c;          /* the field */
+    --ink-2: #101016;        /* panels */
+    --ink-3: #16161d;        /* raised: meters, buttons, chips */
+    --well: #050508;         /* sunk: traces, passages — below the floor */
+    --rule: #23232e;
+    --rule-2: #33333f;
+    --text: #eceaf2;
+    --dim: #8b8898;
+    --dimmer: #625f6e;
+
+    /* The ramp, low energy to peak. Used in this order and nowhere else. */
+    --r-low: #7a1f6b;
+    --r-mid: #d43b7a;        /* signal, live, off-target */
+    --r-high: #f5852f;       /* nearly there / caution */
+    --r-peak: #ffcf5c;       /* in band */
+
+    /* Semantic names the markup and the diagrams already use, mapped onto it. */
+    --accent: var(--r-mid);
+    --good: var(--r-peak);
+    --warn: var(--r-high);
+    --bad: #ff5470;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0; background: var(--ink); color: var(--text);
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
   }
+
+  /* Every micro-label in the interface — eyebrows, meter names, column heads —
+     is the same monospaced small-caps. One rule, so they stay one voice. */
+  .eb, nav h2, aside.numbers h2, .meter .lab, th, .stack .prompt .cnt {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+    text-transform: uppercase; letter-spacing: .16em; color: var(--dim);
+  }
+
   button {
-    font: inherit; color: var(--text); background: var(--panel-2);
-    border: 1px solid var(--line); border-radius: 8px;
+    font: inherit; color: var(--text); background: var(--ink-3);
+    border: 1px solid var(--rule-2); border-radius: 4px;
     padding: 9px 16px; cursor: pointer;
-    transition: border-color .12s, background .12s, filter .12s;
+    transition: border-color .12s, background .12s, color .12s;
   }
-  button:hover:not(:disabled) { border-color: var(--accent); }
-  button:disabled { opacity: .4; cursor: not-allowed; }
-  button.primary { background: var(--accent); color: #0d1117; border-color: var(--accent); font-weight: 600; }
-  button.primary:hover:not(:disabled) { filter: brightness(1.1); }
-  button.recording { background: rgba(239,111,111,.14); border-color: var(--bad); color: #ffc9c9; }
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
+  button:hover:not(:disabled) { border-color: var(--dim); background: #1c1c25; }
+  button:disabled { opacity: .35; cursor: not-allowed; }
+  /* Bone white, not a ramp colour: the ramp belongs to your voice, and a button
+     is not your voice. */
+  button.primary { background: var(--text); color: var(--ink); border-color: var(--text); font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: #fff; border-color: #fff; }
+  button.recording {
+    background: rgba(212,59,122,.12); border-color: var(--r-mid); color: #ffc2dd; font-weight: 600;
+  }
+  :focus-visible { outline: 2px solid var(--r-peak); outline-offset: 2px; border-radius: 4px; }
 
   header {
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    padding: 12px 20px; border-bottom: 1px solid var(--line);
-    background: rgba(26,29,38,.86); backdrop-filter: blur(10px);
-    position: sticky; top: 0; z-index: 20;
+    padding: 12px 20px; border-bottom: 1px solid var(--rule);
+    background: var(--ink); position: sticky; top: 0; z-index: 20;
   }
-  header h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  header h1 {
+    font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .28em;
+    text-transform: uppercase; font-family: var(--mono);
+  }
   .mic-state {
-    font-size: 12.5px; color: var(--dim); display: flex; align-items: center; gap: 7px;
-    background: var(--panel-2); border: 1px solid var(--line);
-    border-radius: 999px; padding: 4px 12px 4px 10px;
+    font-size: 11px; font-family: var(--mono); text-transform: uppercase; letter-spacing: .1em;
+    color: var(--dim); display: flex; align-items: center; gap: 7px;
+    background: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 5px 10px;
   }
-  .mic-state.live { border-color: rgba(90,211,154,.4); color: #a8e8c9; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: #555c70; flex-shrink: 0; }
-  .dot.on { background: var(--good); box-shadow: 0 0 0 0 rgba(90,211,154,.6); animation: pulse 2s ease-out infinite; }
+  .mic-state.live { border-color: rgba(255,207,92,.4); color: var(--r-peak); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dimmer); flex-shrink: 0; }
+  .dot.on { background: var(--r-peak); box-shadow: 0 0 0 0 rgba(255,207,92,.55); animation: pulse 2s ease-out infinite; }
   @keyframes pulse {
-    70% { box-shadow: 0 0 0 7px rgba(90,211,154,0); }
-    100% { box-shadow: 0 0 0 0 rgba(90,211,154,0); }
+    70% { box-shadow: 0 0 0 7px rgba(255,207,92,0); }
+    100% { box-shadow: 0 0 0 0 rgba(255,207,92,0); }
   }
   .spacer { flex: 1; }
+
+  /* The routine strip: streak, today's goal, XP. Set as instrument readouts
+     rather than as badges — same monospace, same graphite, and it only takes
+     colour when there is something true to say. The streak mark is a triangle,
+     not a flame: this interface has one colour vocabulary and a cartoon fire
+     would be the only thing in it that is not measuring something. */
+  .strip {
+    display: flex; align-items: center; gap: 12px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
+    color: var(--dim); background: var(--ink-2);
+    border: 1px solid var(--rule); border-radius: 3px; padding: 4px 8px 4px 10px;
+  }
+  .strip .sg { display: flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+  .strip .sg b { font-size: 9px; color: var(--dimmer); }
+  .strip .sg.live { color: var(--r-peak); }
+  .strip .sg.live b { color: var(--r-peak); }
+  .strip .gdots { display: flex; align-items: center; gap: 4px; }
+  .strip .gd {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: transparent; border: 1px solid var(--rule-2);
+  }
+  .strip .gd.on { background: var(--r-mid); border-color: var(--r-mid); }
+  .strip .gdots.met .gd.on { background: var(--r-peak); border-color: var(--r-peak); }
+  .strip .gdots em { font-style: normal; margin-left: 3px; font-variant-numeric: tabular-nums; }
+  .strip .gdots.met em { color: var(--r-peak); }
+  .strip .xp { color: var(--dimmer); font-variant-numeric: tabular-nums; }
+  .strip .mute {
+    padding: 0 2px; background: none; border: none; font-size: 12px;
+    line-height: 1; opacity: .55; border-radius: 3px;
+  }
+  .strip .mute:hover { opacity: 1; background: none; border: none; }
+
+  /* The XP number leaves the step that earned it. */
+  .xpfly {
+    position: fixed; z-index: 60; pointer-events: none; transform: translate(-50%, -50%);
+    font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--r-peak);
+    text-shadow: 0 0 12px rgba(255,207,92,.5);
+    animation: xpfly 1.1s cubic-bezier(.2,.7,.3,1) forwards;
+  }
+  @keyframes xpfly {
+    0%   { opacity: 0; transform: translate(-50%, -50%) scale(.85); }
+    18%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -190%) scale(1); }
+  }
+  /* End-of-day summary. Same card, same rules — it is a readout of the day,
+     not a trophy screen, so nothing in it is bigger or brighter than the
+     numbers it is reporting. */
+  .sum-back {
+    position: fixed; inset: 0; z-index: 50; background: rgba(5,5,8,.72);
+    display: grid; place-items: center; padding: 20px;
+    overflow-y: auto; animation: fade .18s ease-out;
+  }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  .sum {
+    width: min(440px, 100%); margin: auto; max-height: 100%; overflow-y: auto;
+    box-shadow: 0 18px 60px rgba(0,0,0,.6);
+  }
+  .sum-stats { display: flex; gap: 22px; margin: 14px 0 4px; }
+  .sum-stats div { display: flex; flex-direction: column; gap: 2px; }
+  .sum-stats b {
+    font-family: var(--mono); font-size: 23px; font-weight: 600; color: var(--r-peak);
+    font-variant-numeric: tabular-nums; line-height: 1.1;
+  }
+  .sum-stats span {
+    font-family: var(--mono); font-size: 9.5px; text-transform: uppercase;
+    letter-spacing: .13em; color: var(--dim);
+  }
+  .sum-steps { list-style: none; margin: 18px 0 0; padding: 0; }
+  .sum-steps li {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+    padding: 7px 0; border-bottom: 1px solid var(--rule); font-size: 13.5px;
+  }
+  .sum-steps li::before { content: '✓'; color: var(--r-peak); font-size: 11px; margin-right: -6px; }
+  .sum-steps li span { flex: 1; }
+  .sum-steps em {
+    font-style: normal; font-family: var(--mono); font-size: 11px;
+    color: var(--dim); font-variant-numeric: tabular-nums;
+  }
+  .sum-cmp { margin-top: 18px; }
+  .sum-cmp .d-up { color: var(--r-peak); }
+  .sum-cmp .d-down { color: var(--r-mid); }
+  .sum-cmp .d-flat { color: var(--dim); }
+
+  .spark {
+    position: fixed; z-index: 60; pointer-events: none;
+    width: 5px; height: 5px; border-radius: 50%; margin: -2.5px 0 0 -2.5px;
+    animation: spark .9s cubic-bezier(.15,.8,.3,1) forwards;
+  }
+  @keyframes spark {
+    0%   { opacity: 1; transform: translate(0, 0) scale(1); }
+    100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(.3); }
+  }
 
   /* Grid rather than flex so the numbers panel can sit beside the exercise on
      a wide screen and below it on a phone, where a table above the exercise
@@ -94,58 +228,76 @@
   nav { grid-area: nav; }
   aside.numbers { grid-area: numbers; }
   main { grid-area: main; }
+  nav h2, aside.numbers h2 { margin: 0 0 9px 1px; }
 
-  nav h2, aside.numbers h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--dim); margin: 0 0 8px 4px; }
+  /* The practice list is a sequence — a routine you work down — so the numbers
+     are real information and are set as an instrument would set them: 01, 02,
+     monospaced, in their own column. Calibration and the log are not steps in
+     that sequence and get a glyph instead of a number. */
   .ex {
-    display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; margin-bottom: 5px;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px;
-    position: relative;
+    display: flex; align-items: flex-start; gap: 11px; width: 100%; text-align: left; margin-bottom: 3px;
+    background: transparent; border: 1px solid transparent; border-radius: 4px;
+    padding: 9px 11px; position: relative; transition: background .12s, border-color .12s;
   }
-  .ex.active { border-color: var(--accent); background: var(--panel-2); }
+  .ex:hover:not(:disabled) { background: var(--ink-2); border-color: var(--rule); }
+  .ex.active { background: var(--ink-2); border-color: var(--rule-2); }
   .ex.active::before {
-    content: ''; position: absolute; left: -1px; top: 9px; bottom: 9px;
-    width: 3px; border-radius: 3px; background: var(--accent);
+    content: ''; position: absolute; left: -1px; top: -1px; bottom: -1px;
+    width: 2px; background: var(--r-mid);
   }
   .ex .n {
-    flex-shrink: 0; width: 21px; height: 21px; border-radius: 6px; margin-top: 1px;
-    background: var(--panel-2); border: 1px solid var(--line); color: var(--dim);
-    font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;
-    font-variant-numeric: tabular-nums;
+    flex-shrink: 0; width: 20px; margin-top: 1px; text-align: center;
+    font-family: var(--mono); font-size: 11px; color: var(--dimmer);
+    font-variant-numeric: tabular-nums; letter-spacing: .02em;
   }
-  .ex.active .n { background: var(--accent); border-color: var(--accent); color: #0d1117; }
-  .ex.done .n { border-color: rgba(90,211,154,.5); color: var(--good); }
-  .ex .t { font-weight: 600; font-size: 13.5px; }
+  .ex.active .n { color: var(--r-mid); }
+  .ex.done .n { color: var(--r-peak); }
+  .ex .t { font-weight: 550; font-size: 13.5px; letter-spacing: -.005em; }
   .ex .s { font-size: 12px; color: var(--dim); margin-top: 1px; line-height: 1.4; }
-  .locked-note { font-size: 11.5px; color: var(--dim); margin: 6px 0 0 4px; }
 
-  @media (max-width: 860px) {
-    .layout {
-      padding: 16px 14px 40px; gap: 16px;
-      grid-template-columns: minmax(0, 1fr);
-      grid-template-areas: "nav" "main" "numbers";
-    }
-    #exList { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; }
-    #exList .ex { width: auto; min-width: 172px; flex-shrink: 0; margin-bottom: 0; }
+  /* Path states. A finished step recedes rather than lighting up — you are
+     looking for what is left, and the loudest thing in the list should be the
+     one you have not done. */
+  .ex.done .t, .ex.done .s { color: var(--dim); }
+  .ex.done .t { font-weight: 500; }
+  .ex .xpb {
+    margin-left: auto; align-self: center; font-family: var(--mono);
+    font-size: 10px; color: var(--r-peak); opacity: .75; font-variant-numeric: tabular-nums;
   }
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before { animation: none !important; transition: none !important; }
-  }
+  .ex.next .n { color: var(--r-peak); }
+  .ex.next .t { color: var(--text); }
+  .ex.locked { opacity: 1; }
+  .ex.locked .n, .ex.locked .t, .ex.locked .s { color: var(--dimmer); }
+  .ex.locked:disabled { opacity: .55; }
+  .locked-note { font-size: 11.5px; color: var(--dim); margin: 8px 0 0 1px; }
 
   main { flex: 1; min-width: 0; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
-  .card h3 { margin: 0 0 5px; font-size: 19px; letter-spacing: -.01em; }
-  .why { color: var(--dim); font-size: 13.5px; margin: 0 0 14px; max-width: 68ch; }
+  .card {
+    background: var(--ink-2); border: 1px solid var(--rule); border-radius: 5px;
+    padding: 22px; margin-bottom: 14px;
+  }
+  /* The eyebrow carries the step number and the exercise name; the h3 below it
+     says what you are about to do. Together they replace a title that had to
+     do both jobs at once. */
+  .eb {
+    display: flex; align-items: center; gap: 10px;
+    margin: -2px 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--rule);
+  }
+  .eb i { font-style: normal; color: var(--text); }
+  .eb s { flex: 1; height: 1px; background: var(--rule); text-decoration: none; }
+  .card h3 { margin: 0 0 6px; font-size: 20px; font-weight: 620; letter-spacing: -.02em; }
+  .why { color: var(--dim); font-size: 13.5px; margin: 0 0 15px; max-width: 68ch; }
   .steps { margin: 0 0 4px; padding-left: 21px; max-width: 62ch; }
   .steps li { margin-bottom: 7px; }
-  .steps li::marker { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .steps li::marker { color: var(--dimmer); font-family: var(--mono); font-size: 12px; }
   /* Diagnosis and caveats read as steps when they sit inside the list, so they
      live below it instead — you can follow the numbers with your mouth busy. */
-  .note { font-size: 13px; color: var(--dim); margin: 12px 0 0; max-width: 66ch; }
+  .note { font-size: 13px; color: var(--dim); margin: 13px 0 0; max-width: 66ch; }
   .note b { color: var(--text); font-weight: 600; }
 
   .diagram {
-    margin: 16px 0 0; padding: 14px 16px 12px;
-    background: #0e1016; border: 1px solid var(--line); border-radius: 10px;
+    margin: 16px 0 0; padding: 15px 16px 12px;
+    background: var(--well); border: 1px solid var(--rule); border-radius: 4px;
   }
   .diagram .dwrap { margin: 0 auto; }
   .diagram svg { display: block; width: 100%; height: auto; overflow: visible; }
@@ -153,81 +305,139 @@
      measure, which is why the caption is a block wrapping an inner span. */
   .diagram figcaption {
     font-size: 12.5px; color: var(--dim); line-height: 1.5;
-    margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--line);
+    margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--rule);
   }
   .diagram figcaption span { display: block; max-width: 70ch; }
 
-  canvas { width: 100%; display: block; border-radius: 9px; background: #0e1016; }
+  canvas { width: 100%; display: block; border-radius: 3px; background: var(--well); }
 
-  .meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 14px; }
-  .meter { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; transition: border-color .15s; }
-  .meter .lab { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--dim); }
-  .meter .val { font-family: var(--mono); font-size: 25px; font-weight: 600; margin: 3px 0 2px; font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 16px; }
+  .meter {
+    background: var(--ink-3); border: 1px solid var(--rule); border-radius: 4px;
+    padding: 11px 13px 13px; transition: border-color .15s;
+  }
+  .meter .val {
+    font-family: var(--mono); font-size: 26px; font-weight: 500; margin: 5px 0 2px;
+    font-variant-numeric: tabular-nums; line-height: 1.1; letter-spacing: -.02em;
+  }
   .meter .sub { font-size: 12px; color: var(--dim); min-height: 17px; }
-  .meter.muted { opacity: .38; }
-  .meter.hit { border-color: rgba(90,211,154,.45); }
-  .meter.hit .val { color: var(--good); }
-  .meter.idle .val { color: var(--dim); }
+  .meter.muted { opacity: .35; }
+  .meter.hit { border-color: rgba(255,207,92,.45); }
+  .meter.hit .val { color: var(--r-peak); }
+  .meter.idle .val { color: var(--dimmer); }
 
-  .bar { height: 6px; background: #0e1016; border-radius: 4px; margin-top: 9px; position: relative; overflow: hidden; }
-  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width .09s linear, background .15s; }
-  .meter.hit .bar > i { background: var(--good); }
-  .bar > u { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); border-radius: 2px; }
+  /* The bar is a scale, not a progress bar: ticks along the track, the reading
+     as a lit segment on it, the target as a notch you are trying to reach. */
+  .bar {
+    height: 7px; background: var(--well); border-radius: 2px; margin-top: 10px;
+    position: relative; overflow: hidden;
+    background-image: repeating-linear-gradient(90deg, var(--rule) 0 1px, transparent 1px 25%);
+  }
+  .bar > i {
+    display: block; height: 100%; width: 0; border-radius: 2px;
+    background: linear-gradient(90deg, var(--r-low), var(--r-mid));
+    transition: width .09s linear, background .15s;
+  }
+  .meter.hit .bar > i { background: linear-gradient(90deg, var(--r-high), var(--r-peak)); }
+  .bar > u { position: absolute; top: -1px; bottom: -1px; width: 1px; background: var(--text); opacity: .55; }
 
-  .banner { padding: 11px 15px; border-radius: 9px; font-size: 13.5px; margin-bottom: 16px; border: 1px solid; }
-  .banner.compact { padding: 9px 14px; font-size: 12.5px; display: flex; gap: 9px; align-items: flex-start; }
+  .banner {
+    padding: 12px 15px; border-radius: 4px; font-size: 13.5px; margin-bottom: 16px;
+    border: 1px solid; border-left-width: 2px;
+  }
+  .banner.compact { padding: 10px 14px; font-size: 12.5px; display: flex; gap: 10px; align-items: flex-start; }
   .banner.compact b { font-weight: 650; }
   /* display:flex above would otherwise beat the UA rule for [hidden]. */
   .banner[hidden] { display: none; }
-  .banner.safety { background: rgba(240,180,94,.09); border-color: rgba(240,180,94,.35); color: #f3cd94; }
-  .banner.info { background: rgba(110,168,255,.09); border-color: rgba(110,168,255,.35); color: #b8d3ff; }
-  .banner.err { background: rgba(239,111,111,.1); border-color: rgba(239,111,111,.4); color: #ffb3b3; }
+  .banner.safety { background: rgba(245,133,47,.07); border-color: rgba(245,133,47,.3); border-left-color: var(--r-high); color: #f6c79b; }
+  .banner.info { background: var(--ink-3); border-color: var(--rule-2); border-left-color: var(--dim); color: var(--dim); }
+  .banner.info b { color: var(--text); }
+  .banner.err { background: rgba(255,84,112,.08); border-color: rgba(255,84,112,.35); border-left-color: var(--bad); color: #ffb0bf; }
 
-  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
-  .passage { background: #0e1016; border-radius: 9px; padding: 15px 17px; font-size: 16.5px; line-height: 1.75; border: 1px solid var(--line); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+  .passage {
+    background: var(--well); border-radius: 4px; padding: 16px 18px;
+    font-size: 16.5px; line-height: 1.8; border: 1px solid var(--rule);
+  }
   table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 6px; }
-  td, th { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
-  th { color: var(--dim); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  td, th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); }
+  th { padding-bottom: 6px; }
   td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .ok { color: var(--good); } .no { color: var(--warn); }
+  .ok { color: var(--r-peak); } .no { color: var(--r-high); }
   .hint { font-size: 12.5px; color: var(--dim); margin-top: 10px; }
 
   /* Statement endings. Prompt, contour and verdict are one bordered stack on
      purpose: you read the sentence, look down two centimetres, and see what the
      ending did. Spreading them across separate cards put the feedback far
      enough from the prompt that you had to hunt for it. */
-  .stack { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #0e1016; }
-  .stack .prompt { padding: 13px 17px 15px; border-bottom: 1px solid var(--line); }
-  .stack .prompt .cnt { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--dim); }
-  .stack .prompt .say { font-size: 20px; line-height: 1.4; margin-top: 3px; }
-  .stack canvas { display: block; width: 100%; height: 188px; }
+  .stack { border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; background: var(--well); }
+  .stack .prompt { padding: 14px 17px 15px; border-bottom: 1px solid var(--rule); }
+  .stack .prompt .say { font-size: 20px; line-height: 1.45; margin-top: 5px; }
+  .stack canvas { display: block; width: 100%; height: 188px; border-radius: 0; }
   /* A trace that is not inside a stack still needs its own edge, now that it
      shares a card with the text above it. */
-  .trace { display: block; width: 100%; height: 200px; background: #0e1016;
-           border: 1px solid var(--line); border-radius: 10px; }
+  .trace { display: block; width: 100%; height: 200px; background: var(--well);
+           border: 1px solid var(--rule); border-radius: 4px; }
   .verdict { display: flex; gap: 11px; align-items: baseline; flex-wrap: wrap;
-             padding: 11px 17px; background: var(--panel-2); border-top: 1px solid var(--line); }
-  .verdict .v { font-family: var(--mono); font-size: 18px; font-weight: 600; color: var(--dim); }
+             padding: 12px 17px; background: var(--ink-3); border-top: 1px solid var(--rule); }
+  .verdict .v { font-family: var(--mono); font-size: 17px; font-weight: 500; color: var(--dim); }
   .verdict .d { font-size: 12.5px; color: var(--dim); }
-  .verdict.good .v { color: var(--good); }
-  .verdict.warn .v { color: var(--warn); }
-  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
-  .chip { width: 27px; height: 27px; border-radius: 7px; display: grid; place-items: center;
-          font-size: 14px; background: var(--panel-2); border: 1px solid var(--line); color: var(--dim); }
-  .chip.fall { color: var(--good); border-color: rgba(90,211,154,.45); }
-  .chip.rise { color: var(--warn); border-color: rgba(240,180,94,.45); }
-  .chips .cnt { font-size: 12.5px; color: var(--dim); margin-left: 4px; }
+  .verdict.good .v { color: var(--r-peak); }
+  .verdict.warn .v { color: var(--r-high); }
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 13px; align-items: center; }
+  .chip { width: 26px; height: 26px; border-radius: 3px; display: grid; place-items: center;
+          font-size: 13px; background: var(--ink-3); border: 1px solid var(--rule); color: var(--dimmer); }
+  .chip.fall { color: var(--r-peak); border-color: rgba(255,207,92,.45); }
+  .chip.rise { color: var(--r-high); border-color: rgba(245,133,47,.45); }
+  .chips .cnt { font-size: 12.5px; color: var(--dim); margin-left: 5px; font-family: var(--mono); }
 
   /* The explanation matters once, and is in the way every session after that. */
-  .explain { margin: 0 0 14px; }
+  .explain { margin: 0 0 15px; }
   .explain > summary { cursor: pointer; color: var(--dim); font-size: 13px; list-style: none;
-                       display: inline-flex; gap: 6px; align-items: center; }
+                       display: inline-flex; gap: 7px; align-items: center; }
   .explain > summary::-webkit-details-marker { display: none; }
-  .explain > summary::before { content: "▸"; font-size: 11px; }
-  .explain[open] > summary::before { content: "▾"; }
+  .explain > summary::before { content: "+"; font-family: var(--mono); font-size: 13px; }
+  .explain[open] > summary::before { content: "–"; }
   .explain > summary:hover { color: var(--text); }
-  .explain > div { padding-top: 12px; }
-  code { font-family: var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: .92em; }
+  .explain > div { padding-top: 13px; }
+  code { font-family: var(--mono); background: var(--ink-3); padding: 1px 5px; border-radius: 3px; font-size: .92em; }
+
+  /* ---- Glossary ---------------------------------------------------------
+     Anatomy words are load-bearing here — "lower the larynx" is an instruction
+     you cannot follow if you do not know what a larynx is or what moving one
+     feels like. Rather than dilute the copy, the terms carry a dotted underline
+     and open a definition where they sit. */
+  /* A button, so it is reachable by keyboard — but the UA stylesheet resets
+     case and tracking on buttons, and a term sitting inside a small-caps meter
+     label has to keep wearing that label's clothes. */
+  .term {
+    font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0;
+    letter-spacing: inherit; text-transform: inherit; text-align: inherit;
+    border-bottom: 1px dashed var(--dimmer); cursor: help; border-radius: 0;
+  }
+  .term:hover, .term[aria-expanded="true"] { color: var(--r-peak); border-bottom-color: var(--r-peak); }
+  #gloss {
+    position: absolute; z-index: 60; width: min(310px, calc(100vw - 24px));
+    background: var(--ink-3); border: 1px solid var(--rule-2); border-radius: 5px;
+    padding: 13px 15px 14px; box-shadow: 0 14px 34px rgba(0,0,0,.6);
+  }
+  #gloss[hidden] { display: none; }
+  #gloss .gt {
+    font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: .16em; color: var(--r-peak); margin-bottom: 7px;
+  }
+  #gloss .gd { font-size: 13.5px; line-height: 1.55; }
+  /* What it feels like from the inside, which is the part a dictionary leaves
+     out and the part you actually practise with. */
+  #gloss .gf {
+    font-size: 13px; line-height: 1.5; color: var(--dim);
+    margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--rule);
+  }
+  #gloss .gf b { color: var(--text); font-weight: 600; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before { animation: none !important; transition: none !important; }
+  }
 
   /* Installed on a phone the page owns the whole screen, notch and home bar
      included, so keep the sticky header and the last row clear of both. */
@@ -235,11 +445,102 @@
            padding-left: calc(20px + env(safe-area-inset-left));
            padding-right: calc(20px + env(safe-area-inset-right)); }
   .layout { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
+
+  @media (max-width: 860px) {
+    .layout {
+      padding: 14px 12px 40px; gap: 16px;
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "nav" "main" "numbers";
+    }
+    /* align-items:flex-start, or every card in the strip stretches to the
+       height of the tallest one and the row becomes a wall of empty boxes. */
+    #exList {
+      display: flex; align-items: flex-start; gap: 7px;
+      overflow-x: auto; -webkit-overflow-scrolling: touch;
+      scroll-snap-type: x proximity; overscroll-behavior-x: contain;
+      scrollbar-width: none;
+      /* Bleed to the screen edges so the strip reads as scrollable. */
+      margin: 0 -12px; padding: 1px 12px 3px;
+    }
+    #exList::-webkit-scrollbar { display: none; }
+    #exList .ex {
+      width: auto; min-width: 166px; max-width: 78vw; flex-shrink: 0;
+      margin-bottom: 0; scroll-snap-align: start;
+      background: var(--ink-2); border-color: var(--rule);
+    }
+    #exList .ex.active { border-color: var(--rule-2); }
+  }
+
+  /* Phone. Last in the sheet on purpose — these are overrides of the rules
+     above, and a media query carries no extra weight in the cascade.
+     Two wrapped rows of header controls ate a third of the fold, and the mic
+     pill's label only repeats what the button beside it says, so on a narrow
+     screen the pill shrinks to its status dot and the bar stays one line. */
+  @media (max-width: 700px) {
+    header { gap: 9px;
+             padding: calc(9px + env(safe-area-inset-top)) calc(13px + env(safe-area-inset-right))
+                      9px calc(13px + env(safe-area-inset-left)); }
+    header h1 { font-size: 13px; letter-spacing: .24em; }
+    .mic-state { padding: 7px; gap: 0; }
+    .mic-state #micLabel { display: none; }
+    /* The full title plus both controls is ~15px too wide for a 375px phone,
+       and wrapping costs a whole row of sticky header. The app's own short
+       name is "Voice", so that is what a phone shows. */
+    .wordmark { display: none; }
+    /* 44px is the smallest square a thumb hits reliably. Glossary terms are
+       excluded: they are words inside a sentence, not controls. */
+    button:not(.term) { min-height: 44px; padding: 10px 15px; }
+    /* Reset is rare and destructive: reachable, but not competing for width
+       with the control pressed at the start of every session. */
+    #resetBtn { width: 44px; padding: 0; font-size: 0; flex-shrink: 0; }
+    #resetBtn::before { content: '↺'; font-size: 19px; line-height: 1; }
+
+    /* On a phone the strip is not in the header at all — placeStrip() moves it
+       above the practice list, because in the header it forced a second sticky
+       row and cost 35px off the top of every screen, which is the exact thing
+       the rules above exist to prevent. Out of the bar it can afford to be
+       fuller than the desktop version rather than thinner. */
+    .strip {
+      width: 100%; justify-content: flex-start; gap: 14px;
+      padding: 8px 11px; margin-bottom: 10px;
+    }
+    .strip .xp { margin-left: auto; }
+    .strip .mute { min-height: 0; }
+
+    .card { padding: 16px 14px; margin-bottom: 12px; }
+    .card h3 { font-size: 18px; }
+    .why, .note { font-size: 13px; }
+    .steps { padding-left: 19px; }
+    .passage { padding: 14px 15px; font-size: 16px; }
+    .stack .prompt { padding: 13px 15px 14px; }
+    .stack .prompt .say { font-size: 18px; }
+    .stack canvas { height: 152px; }
+    .trace { height: 168px; }
+    .diagram { padding: 13px 12px 10px; }
+    /* Fixed two columns rather than auto-fit: the meters are read out of the
+       corner of your eye while you speak, so a legible number beats fitting
+       one more box on the line. */
+    .meters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .meter { padding: 10px 11px 12px; }
+    .meter .val { font-size: 22px; }
+    /* Five columns of takes cannot fit 390px, so the table scrolls inside its
+       own box rather than dragging the whole page sideways. */
+    table { font-size: 13px; }
+    td, th { padding: 7px 8px; }
+    /* Buttons in an action row span the width and stack. Sizing them by class
+       instead would move them under the thumb mid-take, since a running take
+       swaps .primary for .recording. */
+    .row { gap: 8px; }
+    .row > button { flex: 1 1 100%; }
+    /* The metric picker is a set of equal choices, not an action row. */
+    #metricRow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
 </style>
 
 <header>
-  <h1>Voice Trainer</h1>
+  <h1>Voice<span class="wordmark"> Trainer</span></h1>
   <div class="mic-state" id="micState" aria-live="polite"><span class="dot" id="dot"></span><span id="micLabel">microphone off</span></div>
+  <div class="strip" id="streakStrip" aria-live="polite"></div>
   <div class="spacer"></div>
   <button id="micBtn" class="primary">Start microphone</button>
   <button id="resetBtn" title="Clear saved calibration and take history">Reset calibration</button>
@@ -309,6 +610,17 @@
   var STORE_KEY = 'voice-trainer-baseline-v1';
   var HISTORY_KEY = 'voice-trainer-history-v1';
   var MAX_TAKES = 300;         // ~a year of daily practice; oldest are dropped
+
+  // The same energy ramp the stylesheet uses, for the things drawn into a
+  // canvas, where a CSS variable cannot reach. Magenta is signal, amber is
+  // signal where you wanted it: that mapping has to hold on the trace and in
+  // the meters at once, or the colours stop meaning anything.
+  var RAMP = {
+    signal: '#d43b7a',   // live, and off target
+    peak:   '#ffcf5c',   // inside the target band
+    high:   '#f5852f',   // caution: a rising ending, a free-speech take
+    quiet:  '#8b8898'    // measured, but not the thing being judged
+  };
 
   // ==========================================================================
   // audio
@@ -398,6 +710,9 @@
     // sitting there labelled "recording" while nothing is being measured.
     if (current && current.abort) current.abort();
     setMicUI(false, 'microphone off');
+    // The analysis loop is where held chimes normally drain, and it has just
+    // stopped — so drain here too rather than leaving one owed indefinitely.
+    if (pendingChime) chime(pendingChime);
   }
 
   function loop(ts) {
@@ -418,6 +733,9 @@
     }
 
     if (current && current.frame) current.frame(a, ts);
+    // A chime earned mid-take is held until the take stops, so it cannot be
+    // measured as part of your voice. This is where it gets let out.
+    if (pendingChime && !takeRunning()) chime(pendingChime);
     requestAnimationFrame(loop);
   }
 
@@ -476,6 +794,388 @@
     renderExList();
   }
 
+  // ==========================================================================
+  // the routine: streak, daily goal, and what you have finished today
+  //
+  // Voice change is a months-long habit, and the thing that decides whether it
+  // happens is whether you come back tomorrow — not how good any one take was.
+  // So this layer counts *turning up*, deliberately, and keeps well away from
+  // the measurements: nothing here can move a target, alter a score, or change
+  // what a meter says. It is a wrapper around the practice, not part of it.
+  //
+  // What is kept: a day string, which steps were finished on it, lifetime XP,
+  // and the streak. Still four numbers and a date, still nothing but yours.
+  // ==========================================================================
+
+  var PROGRESS_KEY = 'voice-trainer-progress-v1';
+
+  // The eight drills, in the order the routine intends: semi-occluded warm-up
+  // before any pitch work, connected speech last.
+  var ROUTINE = ['straw', 'yawn', 'ng', 'vowels', 'glide', 'endings', 'passage', 'free'];
+
+  // Five of the eight is roughly ten minutes. A goal you can hit on a bad day
+  // is the one that survives; asking for all eight would break the streak on
+  // exactly the days that keeping it matters.
+  var DAILY_GOAL = 5;
+
+  var XP_STEP = 10;    // for finishing a step at all — turning up is the point
+  var XP_QUALITY = 10; // scaled 0..1 by how well it went, so it can never be
+                       // worth skipping the work to farm the base award
+
+  var progress = loadProgress();
+
+  // Local calendar day. Deliberately local rather than UTC: a streak is about
+  // your days, and practising at 11pm should not count as tomorrow.
+  function today() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  function dayBefore(day) {
+    var p = day.split('-');
+    var d = new Date(+p[0], +p[1] - 1, +p[2]);
+    d.setDate(d.getDate() - 1);
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+
+  function loadProgress() {
+    var p;
+    try { p = JSON.parse(localStorage.getItem(PROGRESS_KEY)); } catch (e) { p = null; }
+    if (!p || typeof p !== 'object') p = {};
+    return {
+      xp: p.xp || 0,
+      streak: p.streak || 0,
+      best: p.best || 0,
+      lastGoalDay: p.lastGoalDay || null,   // last day the daily goal was met
+      day: p.day || today(),                // the day `done` refers to
+      done: p.done && typeof p.done === 'object' ? p.done : {},  // id -> xp earned today
+      ever: Array.isArray(p.ever) ? p.ever : [],                 // ids ever completed: what unlocks the path
+      muted: !!p.muted
+    };
+  }
+  function saveProgress() {
+    try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress)); } catch (e) {}
+  }
+
+  // Called before anything reads today's state. Rolling the day here rather
+  // than on a timer means the app can sit open across midnight and still be
+  // right the next time you touch it.
+  function rollDay() {
+    var t = today();
+    if (progress.day === t) return;
+    progress.day = t;
+    progress.done = {};
+    // The streak survives exactly one missed calendar day's worth of gap: it is
+    // broken only once the last goal day is further back than yesterday.
+    if (progress.lastGoalDay && progress.lastGoalDay !== t && progress.lastGoalDay !== dayBefore(t)) {
+      progress.streak = 0;
+    }
+    saveProgress();
+  }
+
+  // Only the eight drills count toward a day. Calibration is deliberately not
+  // among them: it is the setup the targets come from, not practice, and
+  // letting it fill a slot would mean a day's goal could be met without
+  // actually using your voice for anything.
+  function doneToday() {
+    return Object.keys(progress.done).filter(function (id) { return ROUTINE.indexOf(id) >= 0; });
+  }
+  function goalMet() { return doneToday().length >= DAILY_GOAL; }
+  function stepDone(id) { return Object.prototype.hasOwnProperty.call(progress.done, id); }
+
+  // A step is available once the one before it has *ever* been finished. This
+  // gives the guided order on a first run, where the sequence is genuinely
+  // load-bearing — warm up before pitch work — without trapping you in it
+  // afterwards: once you have done a drill, it stays open for good.
+  function stepLocked(id) {
+    if (base.habitualF0 == null) return true;          // calibration gates everything
+    var i = ROUTINE.indexOf(id);
+    if (i <= 0) return false;                          // not in the routine, or the first step
+    return progress.ever.indexOf(ROUTINE[i - 1]) < 0;
+  }
+
+  // The next thing to do: the first routine step not yet finished today and not
+  // locked. It is the only step the path actively points at, and it is what the
+  // app opens on, so coming back answers "what now" without you having to
+  // remember where you stopped. Null once the whole routine is done for the day.
+  function nextStep() {
+    if (base.habitualF0 == null) return null;
+    rollDay();
+    for (var i = 0; i < ROUTINE.length; i++) {
+      if (!stepDone(ROUTINE[i]) && !stepLocked(ROUTINE[i])) return ROUTINE[i];
+    }
+    return null;
+  }
+
+  // The one entry point. `quality` is 0..1 and may be omitted when a drill has
+  // no meaningful grade — an unscored step is still a step you did.
+  function completeStep(id, quality) {
+    rollDay();
+    if (stepDone(id)) return;                          // once a day; no XP farming
+    var q = quality == null ? 0.5 : Math.max(0, Math.min(1, quality));
+    var earned = XP_STEP + Math.round(XP_QUALITY * q);
+
+    progress.done[id] = earned;
+    progress.xp += earned;
+    if (progress.ever.indexOf(id) < 0) progress.ever.push(id);
+
+    var hitGoalNow = goalMet() && progress.lastGoalDay !== progress.day;
+    if (hitGoalNow) {
+      progress.lastGoalDay = progress.day;
+      progress.streak += 1;
+      if (progress.streak > progress.best) progress.best = progress.streak;
+    }
+    saveProgress();
+
+    renderStreak();
+    renderExList();
+    celebrate(id, earned, hitGoalNow);
+    if (hitGoalNow) showSummary();
+  }
+
+  // --- reward: sound and motion ---------------------------------------------
+  //
+  // Two constraints shape all of this. A chime played while a take is running
+  // goes straight down the microphone — echo cancellation is deliberately off,
+  // because it corrupts acoustic measurement — so it would land in the very
+  // numbers being scored. And the burst has to stay inside the ramp: this
+  // interface has one source of colour and it is your voice, so a shower of
+  // primaries would break the only rule the design has.
+
+  // Every drill marks its take by putting `recording` on the shared #go button,
+  // so that class is already an accurate global answer to "is the microphone
+  // being scored right now" without each exercise having to report in.
+  function takeRunning() { return !!document.querySelector('#go.recording'); }
+
+  var pendingChime = null;
+
+  function chime(kind) {
+    if (progress.muted) return;
+    // Held until the take stops; drained from the analysis loop.
+    if (takeRunning()) { pendingChime = kind; return; }
+    pendingChime = null;
+    try {
+      var C = window.AudioContext || window.webkitAudioContext;
+      if (!C) return;
+      // Its own short-lived context, so this can never touch the analysis graph.
+      var ctx = new C();
+      // A rising perfect fifth for a step; the octave above it when the day is
+      // done. Sine and quiet — this sits next to someone listening closely to
+      // their own voice.
+      var notes = kind === 'goal' ? [523.25, 783.99, 1046.5] : [523.25, 783.99];
+      notes.forEach(function (f, i) {
+        var o = ctx.createOscillator(), g = ctx.createGain();
+        var t0 = ctx.currentTime + i * 0.11;
+        o.type = 'sine'; o.frequency.value = f;
+        g.gain.setValueAtTime(0, t0);
+        g.gain.linearRampToValueAtTime(0.14, t0 + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.34);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(t0); o.stop(t0 + 0.36);
+      });
+      setTimeout(function () { try { ctx.close(); } catch (e) {} }, 1200);
+    } catch (e) { /* no audio output is not an error worth surfacing */ }
+  }
+
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function celebrate(id, earned, hitGoalNow) {
+    chime(hitGoalNow ? 'goal' : 'step');
+
+    // The XP lands on the step in the path that earned it, so the number has an
+    // obvious origin rather than appearing from the corner of the screen.
+    var anchor = document.querySelector('.ex[data-id="' + id + '"]') ||
+                 document.getElementById('streakStrip');
+    if (!anchor) return;
+    var r = anchor.getBoundingClientRect();
+
+    var fly = document.createElement('div');
+    fly.className = 'xpfly';
+    fly.textContent = '+' + earned + ' XP';
+    fly.style.left = (r.left + r.width / 2) + 'px';
+    fly.style.top = (r.top + r.height / 2) + 'px';
+    document.body.appendChild(fly);
+    setTimeout(function () { fly.remove(); }, 1100);
+
+    if (reduceMotion) return;
+    // Sparks in the ramp only, and only on a finished day — a burst on every
+    // step would make the one that means something indistinguishable.
+    if (!hitGoalNow) return;
+    var colours = ['#d43b7a', '#f5852f', '#ffcf5c'];
+    for (var i = 0; i < 18; i++) {
+      var s = document.createElement('i');
+      s.className = 'spark';
+      var ang = (Math.PI * 2 * i) / 18 + Math.random() * 0.3;
+      var dist = 42 + Math.random() * 46;
+      s.style.left = (r.left + r.width / 2) + 'px';
+      s.style.top = (r.top + r.height / 2) + 'px';
+      s.style.background = colours[i % 3];
+      s.style.setProperty('--dx', (Math.cos(ang) * dist).toFixed(1) + 'px');
+      s.style.setProperty('--dy', (Math.sin(ang) * dist).toFixed(1) + 'px');
+      document.body.appendChild(s);
+      /* jshint loopfunc:true */
+      (function (el) { setTimeout(function () { el.remove(); }, 900); })(s);
+    }
+  }
+
+  // --- the strip in the top bar ---------------------------------------------
+
+  function renderStreak() {
+    rollDay();
+    var el = document.getElementById('streakStrip');
+    if (!el) return;
+    var n = doneToday().length;
+    var met = goalMet();
+    var dots = '';
+    for (var i = 0; i < DAILY_GOAL; i++) {
+      dots += '<i class="gd' + (i < n ? ' on' : '') + '"></i>';
+    }
+    el.innerHTML =
+      '<span class="sg' + (progress.streak > 0 ? ' live' : '') + '" ' +
+        'title="' + (progress.streak > 0
+          ? progress.streak + '-day streak, best ' + progress.best
+          : 'Finish ' + DAILY_GOAL + ' steps today to start a streak') + '">' +
+        '<b aria-hidden="true">▲</b>' + progress.streak + '</span>' +
+      '<span class="gdots' + (met ? ' met' : '') + '" ' +
+        'title="' + n + ' of ' + DAILY_GOAL + ' steps done today">' + dots +
+        '<em>' + n + '/' + DAILY_GOAL + '</em></span>' +
+      '<span class="xp" title="Total XP">' + progress.xp + ' XP</span>' +
+      '<button class="mute" id="muteBtn" title="' +
+        (progress.muted ? 'Sound off' : 'Sound on') + '" aria-label="' +
+        (progress.muted ? 'Turn sound on' : 'Turn sound off') + '">' +
+        (progress.muted ? '🔇' : '🔊') + '</button>';
+    document.getElementById('muteBtn').onclick = function () {
+      progress.muted = !progress.muted;
+      saveProgress();
+      renderStreak();
+    };
+  }
+
+  // The strip belongs in the top bar on a wide screen and above the practice
+  // list on a phone, where the header is already one row too tall. It is the
+  // same element either way rather than two copies to keep in step, so this
+  // moves it — the one thing CSS cannot do, since the two homes are in
+  // different parents.
+  var narrow = window.matchMedia('(max-width: 700px)');
+  function placeStrip() {
+    var strip = document.getElementById('streakStrip');
+    var nav = document.querySelector('nav');
+    var wanted = narrow.matches ? nav : document.querySelector('header');
+    if (strip.parentNode === wanted) return;
+    if (narrow.matches) nav.insertBefore(strip, document.getElementById('exList'));
+    else wanted.insertBefore(strip, document.getElementById('micState').nextSibling);
+  }
+  // addListener is the deprecated spelling, and the only one Safari understood
+  // before 14 — cheap to keep, and this is a page people open on old phones.
+  if (narrow.addEventListener) narrow.addEventListener('change', placeStrip);
+  else if (narrow.addListener) narrow.addListener(placeStrip);
+
+  // --- the end of a day's practice ------------------------------------------
+  //
+  // Shown once, when the goal is met. Its job is to answer "did any of that
+  // work" with the only evidence there is — today's scored takes against the
+  // last day you scored any — and then get out of the way. It reports whatever
+  // the numbers say, including that they went the wrong way: a summary that can
+  // only deliver good news is not worth reading.
+
+  function dayKeyOf(ts) {
+    var d = new Date(ts);
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+
+  // Median of a metric over the takes of one day. `passageOnly` metrics are
+  // restricted the same way the progress charts restrict them, because
+  // resonance is only comparable across the same text.
+  function dayMedian(takes, key, passageOnly) {
+    var v = takes.filter(function (h) {
+      return h[key] != null && (!passageOnly || h.kind === 'passage' || h.kind === 'calibration');
+    }).map(function (h) { return h[key]; });
+    return v.length ? median(v) : null;
+  }
+
+  function summaryDeltas() {
+    var t = progress.day;
+    var byDay = {};
+    history.forEach(function (h) { (byDay[dayKeyOf(h.t)] = byDay[dayKeyOf(h.t)] || []).push(h); });
+    var days = Object.keys(byDay).sort();
+    var prev = null;
+    for (var i = days.length - 1; i >= 0; i--) { if (days[i] < t) { prev = days[i]; break; } }
+    if (!byDay[t] || !prev) return null;
+
+    // `lower` says which direction is an improvement for that measure.
+    var rows = [
+      { label: 'Pitch', key: 'f0', unit: ' Hz', dp: 0, lower: true },
+      { label: 'Resonance', key: 'res', unit: ' cm', dp: 1, lower: false, passageOnly: true },
+      { label: 'Intonation', key: 'sd', unit: ' st', dp: 1, lower: true },
+      { label: 'Weight', key: 'weight', unit: '', dp: 1, lower: false }
+    ].map(function (m) {
+      var now = dayMedian(byDay[t], m.key, m.passageOnly);
+      var was = dayMedian(byDay[prev], m.key, m.passageOnly);
+      if (now == null || was == null) return null;
+      var d = now - was;
+      return {
+        label: m.label,
+        now: now.toFixed(m.dp) + m.unit,
+        delta: (d >= 0 ? '+' : '') + d.toFixed(m.dp) + m.unit,
+        // A change too small to print is called flat rather than dressed up as
+        // movement in whichever direction the noise happened to fall.
+        dir: Math.abs(d) < Math.pow(10, -m.dp) / 2 ? 'flat' : (m.lower ? d < 0 : d > 0) ? 'up' : 'down'
+      };
+    }).filter(Boolean);
+
+    return rows.length ? { prev: prev, rows: rows } : null;
+  }
+
+  function showSummary() {
+    var ids = doneToday();
+    var earned = ids.reduce(function (s, id) { return s + progress.done[id]; }, 0);
+    var cmp = summaryDeltas();
+
+    var titles = {};
+    EXERCISES.forEach(function (e) { titles[e.id] = e.title.replace(/^\d+\.\s*/, ''); });
+
+    var body =
+      '<div class="sum-head">' +
+        '<div class="eb"><i>DAY</i>' + progress.day + '<s></s></div>' +
+        '<h3>Practice done for today</h3>' +
+        '<div class="sum-stats">' +
+          '<div><b>' + progress.streak + '</b><span>day streak' +
+            (progress.best > progress.streak ? ' · best ' + progress.best : '') + '</span></div>' +
+          '<div><b>' + ids.length + '</b><span>of ' + ROUTINE.length + ' steps</span></div>' +
+          '<div><b>+' + earned + '</b><span>XP today</span></div>' +
+        '</div>' +
+      '</div>' +
+      '<ul class="sum-steps">' + ids.map(function (id) {
+        return '<li><span>' + titles[id] + '</span><em>+' + progress.done[id] + '</em></li>';
+      }).join('') + '</ul>' +
+      (cmp
+        ? '<table class="sum-cmp"><tr><th>Measure</th><th>Today</th><th>vs ' + cmp.prev + '</th></tr>' +
+          cmp.rows.map(function (r) {
+            return '<tr><td>' + r.label + '</td><td class="num">' + r.now +
+              '</td><td class="num d-' + r.dir + '">' + r.delta + '</td></tr>';
+          }).join('') + '</table>'
+        : '<p class="hint" style="margin-top:14px">No earlier scored day to compare against yet. ' +
+          'Score a <b>reading passage</b> on two different days and this becomes a comparison.</p>') +
+      '<p class="hint">Day-to-day movement in these is mostly noise — sleep, hydration, time of day. ' +
+      'The trend over weeks in <b>Progress</b> is the thing that means something.</p>' +
+      '<div class="row"><button class="primary" id="sumClose">Done</button></div>';
+
+    var wrap = document.createElement('div');
+    wrap.className = 'sum-back';
+    wrap.innerHTML = '<div class="sum card" role="dialog" aria-modal="true" aria-label="Practice summary">' +
+      body + '</div>';
+    document.body.appendChild(wrap);
+
+    function close() {
+      wrap.remove();
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    wrap.querySelector('#sumClose').onclick = close;
+    wrap.onclick = function (e) { if (e.target === wrap) close(); };
+    document.addEventListener('keydown', onKey);
+    wrap.querySelector('#sumClose').focus();
+  }
+
   // The pitch target, derived rather than assumed. It moves toward the
   // masculine range but is never allowed within FLOOR_MARGIN_ST of the lowest
   // pitch that was actually measured as comfortable.
@@ -530,6 +1230,7 @@
       if (base.intonationSd != null) row('Intonation', base.intonationSd.toFixed(1) + ' st');
     }
     document.querySelector('#baseTable tbody').innerHTML = rows.join('');
+    linkTerms(document.querySelector('#baseTable tbody'));
   }
 
   // ==========================================================================
@@ -619,12 +1320,12 @@
     var rect = this.c.getBoundingClientRect();
     if (!this.w || Math.abs(rect.width - this.w) > 1) this.resize();
     g.clearRect(0, 0, this.w, this.h);
-    g.fillStyle = '#0e1016';
+    g.fillStyle = '#050508';
     g.fillRect(0, 0, this.w, this.h);
 
     // reference lines at the boundaries listeners actually respond to
     var refs = [
-      { hz: MASC_F0_CEILING, label: '130 Hz  reads male', col: 'rgba(90,211,154,.5)' },
+      { hz: MASC_F0_CEILING, label: '130 Hz  reads male', col: 'rgba(255,207,92,.5)' },
       { hz: ANDROGYNOUS_LOW, label: '140', col: 'rgba(143,151,173,.25)' },
       { hz: ANDROGYNOUS_HIGH, label: '165  ambiguous zone', col: 'rgba(143,151,173,.25)' }
     ];
@@ -638,9 +1339,9 @@
 
     if (band) {
       var yTop = this.y(band.hi), yBot = this.y(band.lo);
-      g.fillStyle = 'rgba(110,168,255,.13)';
+      g.fillStyle = 'rgba(212,59,122,.13)';
       g.fillRect(0, yTop, this.w, yBot - yTop);
-      g.strokeStyle = 'rgba(110,168,255,.5)';
+      g.strokeStyle = 'rgba(212,59,122,.5)';
       g.setLineDash([4, 4]);
       g.beginPath(); g.moveTo(0, this.y(band.center)); g.lineTo(this.w, this.y(band.center)); g.stroke();
       g.setLineDash([]);
@@ -654,13 +1355,13 @@
 
     // trace
     g.lineWidth = 2.2;
-    g.strokeStyle = '#6ea8ff';
+    g.strokeStyle = RAMP.signal;
     var drawing = false;
     for (var i = 0; i < this.pts.length; i++) {
       var hz = this.pts[i];
       if (!hz) { if (drawing) { g.stroke(); drawing = false; } continue; }
       var x = i * 2, y = this.y(Math.min(this.hiHz, Math.max(this.loHz, hz)));
-      if (band) g.strokeStyle = (hz >= band.lo && hz <= band.hi) ? '#5ad39a' : '#6ea8ff';
+      if (band) g.strokeStyle = (hz >= band.lo && hz <= band.hi) ? RAMP.peak : RAMP.signal;
       if (!drawing) { g.beginPath(); g.moveTo(x, y); drawing = true; }
       else g.lineTo(x, y);
     }
@@ -712,7 +1413,7 @@
     if (!this.w || Math.abs(rect.width - this.w) > 1) this.resize();
     var w = this.w, h = this.h, PAD = 30;
     g.clearRect(0, 0, w, h);
-    g.fillStyle = '#0e1016';
+    g.fillStyle = '#050508';
     g.fillRect(0, 0, w, h);
     g.font = '11px system-ui';
 
@@ -747,9 +1448,9 @@
     // the sentence rather than the whole thing.
     if (mark) {
       var x0 = x(mark.from), x1 = x(mark.to);
-      g.fillStyle = mark.dir === 'rise' ? 'rgba(240,180,94,.13)' : 'rgba(90,211,154,.13)';
+      g.fillStyle = mark.dir === 'rise' ? 'rgba(245,133,47,.13)' : 'rgba(255,207,92,.13)';
       g.fillRect(x0, 8, Math.max(2, x1 - x0), h - 16);
-      g.fillStyle = mark.dir === 'rise' ? 'rgba(240,180,94,.85)' : 'rgba(90,211,154,.85)';
+      g.fillStyle = mark.dir === 'rise' ? 'rgba(245,133,47,.85)' : 'rgba(255,207,92,.85)';
       g.textAlign = 'center';
       g.fillText('last syllable', (x0 + x1) / 2, h - 6);
       g.textAlign = 'left';
@@ -764,9 +1465,9 @@
     for (i = 0; i < pts.length; i++) {
       if (st[i] == null) continue;
       var inMark = mark && pts[i].t >= mark.from && pts[i].t <= mark.to;
-      var col = !mark ? '#6ea8ff'
-        : inMark ? (mark.dir === 'rise' ? '#f0b45e' : '#5ad39a')
-        : 'rgba(110,168,255,.45)';
+      var col = !mark ? RAMP.signal
+        : inMark ? (mark.dir === 'rise' ? RAMP.high : RAMP.peak)
+        : 'rgba(212,59,122,.45)';
       var here = { x: x(pts[i].t), y: y(st[i]) };
       var brk = prev == null || pts[i].t - prev.t > 120;
       if (drawing && (brk || col !== prevCol)) { g.stroke(); drawing = false; }
@@ -823,10 +1524,10 @@
         'straw at the lips. Air backs up inside the tract and presses down on the vocal folds, so ' +
         'they meet more gently.">' +
       arrowDef('ar-straw', 'var(--good)') +
-      '<rect x="72" y="34" width="286" height="72" fill="rgba(110,168,255,.10)"/>' +
-      '<rect x="358" y="59" width="112" height="22" fill="rgba(110,168,255,.10)"/>' +
-      '<path d="M72 34 H358 L358 59 H470" fill="none" stroke="var(--line)" stroke-width="2"/>' +
-      '<path d="M72 106 H358 L358 81 H470" fill="none" stroke="var(--line)" stroke-width="2"/>' +
+      '<rect x="72" y="34" width="286" height="72" fill="rgba(212,59,122,.10)"/>' +
+      '<rect x="358" y="59" width="112" height="22" fill="rgba(212,59,122,.10)"/>' +
+      '<path d="M72 34 H358 L358 59 H470" fill="none" stroke="var(--rule)" stroke-width="2"/>' +
+      '<path d="M72 106 H358 L358 81 H470" fill="none" stroke="var(--rule)" stroke-width="2"/>' +
       // vocal folds, seen edge-on, with the glottal gap between them
       '<path d="M50 26 L78 62 L50 68 Z" fill="var(--accent)"/>' +
       '<path d="M50 114 L78 78 L50 72 Z" fill="var(--accent)"/>' +
@@ -848,10 +1549,10 @@
       var col = hi ? 'var(--good)' : 'var(--dim)';
       return '<g transform="translate(' + x + ',0)">' +
         '<rect x="34" y="26" width="62" height="' + (laryY - 26) + '" ' +
-          'fill="' + (hi ? 'rgba(90,211,154,.18)' : 'rgba(143,151,173,.22)') + '"/>' +
-        '<path d="M34 26 V128 M96 26 V128" fill="none" stroke="var(--line)" stroke-width="2"/>' +
-        '<line x1="34" y1="26" x2="96" y2="26" stroke="var(--line)" stroke-width="2"/>' +
-        '<rect x="28" y="' + laryY + '" width="74" height="15" rx="4" fill="var(--panel-2)" ' +
+          'fill="' + (hi ? 'rgba(255,207,92,.18)' : 'rgba(143,151,173,.22)') + '"/>' +
+        '<path d="M34 26 V128 M96 26 V128" fill="none" stroke="var(--rule)" stroke-width="2"/>' +
+        '<line x1="34" y1="26" x2="96" y2="26" stroke="var(--rule)" stroke-width="2"/>' +
+        '<rect x="28" y="' + laryY + '" width="74" height="15" rx="4" fill="var(--ink-3)" ' +
           'stroke="' + col + '" stroke-width="1.5"/>' +
         '<line x1="118" y1="28" x2="118" y2="' + (laryY - 2) + '" stroke="' + col + '" ' +
           'stroke-width="1.5" marker-start="url(#ar-lx)" marker-end="url(#ar-lx)"/>' +
@@ -880,7 +1581,7 @@
     // billing with the success case rather than a footnote.
     function panel(x, resPath, title, titleCol, sub) {
       return '<g transform="translate(' + x + ',0)">' +
-        '<rect x="0" y="14" width="196" height="86" rx="8" fill="#0a0c12" stroke="var(--line)"/>' +
+        '<rect x="0" y="14" width="196" height="86" rx="8" fill="#050508" stroke="var(--rule)"/>' +
         '<path d="M18 30 C 70 42, 120 66, 178 84" fill="none" stroke="var(--accent)" stroke-width="2.4"/>' +
         '<path d="' + resPath + '" fill="none" stroke="var(--good)" stroke-width="2.4"/>' +
         '<text x="98" y="120" fill="' + titleCol + '" font-size="12.5" font-weight="600" ' +
@@ -910,10 +1611,10 @@
     function folds(x, depth, title, titleCol, sub) {
       var top = 62 - depth / 2;
       return '<g transform="translate(' + x + ',0)">' +
-        '<rect x="20" y="16" width="58" height="92" rx="6" fill="var(--panel-2)" stroke="var(--line)"/>' +
-        '<rect x="118" y="16" width="58" height="92" rx="6" fill="var(--panel-2)" stroke="var(--line)"/>' +
+        '<rect x="20" y="16" width="58" height="92" rx="6" fill="var(--ink-3)" stroke="var(--rule)"/>' +
+        '<rect x="118" y="16" width="58" height="92" rx="6" fill="var(--ink-3)" stroke="var(--rule)"/>' +
         '<rect x="78" y="' + top + '" width="40" height="' + depth + '" ' +
-          'fill="' + (titleCol === 'var(--good)' ? 'rgba(90,211,154,.35)' : 'rgba(240,180,94,.35)') + '" ' +
+          'fill="' + (titleCol === 'var(--good)' ? 'rgba(255,207,92,.35)' : 'rgba(245,133,47,.35)') + '" ' +
           'stroke="' + titleCol + '" stroke-width="1.5"/>' +
         '<line x1="190" y1="' + top + '" x2="190" y2="' + (top + depth) + '" stroke="' + titleCol + '" ' +
           'stroke-width="1.5" marker-start="url(#ar-wt)" marker-end="url(#ar-wt)"/>' +
@@ -937,14 +1638,14 @@
     return figure(
       '<svg viewBox="0 0 460 140" role="img" aria-label="A sigh gliding downward. The clear part of ' +
         'the glide is counted; the creaky tail past your comfortable floor is not.">' +
-      '<rect x="12" y="10" width="436" height="92" rx="9" fill="#0a0c12" stroke="var(--line)"/>' +
-      '<line x1="12" y1="76" x2="448" y2="76" stroke="rgba(90,211,154,.5)" stroke-width="1.5" ' +
+      '<rect x="12" y="10" width="436" height="92" rx="9" fill="#050508" stroke="var(--rule)"/>' +
+      '<line x1="12" y1="76" x2="448" y2="76" stroke="rgba(255,207,92,.5)" stroke-width="1.5" ' +
         'stroke-dasharray="5 4"/>' +
       '<path d="M40 26 C 120 34, 190 58, 250 74" fill="none" stroke="var(--good)" stroke-width="2.6"/>' +
       '<path d="M250 74 C 300 84, 350 90, 420 93" fill="none" stroke="var(--bad)" stroke-width="2.6" ' +
         'stroke-dasharray="3 4"/>' +
       '<circle cx="250" cy="74" r="4.5" fill="var(--good)"/>' +
-      '<line x1="250" y1="79" x2="250" y2="112" stroke="var(--line)" stroke-width="1.5"/>' +
+      '<line x1="250" y1="79" x2="250" y2="112" stroke="var(--rule)" stroke-width="1.5"/>' +
       '<text x="20" y="70" fill="var(--good)" font-size="11.5">clear — counted</text>' +
       '<text x="440" y="66" fill="var(--bad)" font-size="11.5" text-anchor="end">creaky — not counted</text>' +
       '<text x="250" y="128" fill="var(--text)" font-size="11.5" text-anchor="middle">' +
@@ -960,10 +1661,10 @@
     // pitch, because it is the last half-second that differs and nothing else.
     function panel(x, path, tail, title, titleCol, sub) {
       return '<g transform="translate(' + x + ',0)">' +
-        '<rect x="0" y="14" width="196" height="86" rx="8" fill="#0a0c12" stroke="var(--line)"/>' +
+        '<rect x="0" y="14" width="196" height="86" rx="8" fill="#050508" stroke="var(--rule)"/>' +
         '<path d="' + path + '" fill="none" stroke="var(--accent)" stroke-width="2.4"/>' +
         '<path d="' + tail + '" fill="none" stroke="' + titleCol + '" stroke-width="2.8"/>' +
-        '<line x1="128" y1="20" x2="128" y2="94" stroke="var(--line)" stroke-width="1" ' +
+        '<line x1="128" y1="20" x2="128" y2="94" stroke="var(--rule)" stroke-width="1" ' +
           'stroke-dasharray="3 4"/>' +
         '<text x="98" y="120" fill="' + titleCol + '" font-size="12.5" font-weight="600" ' +
           'text-anchor="middle">' + title + '</text>' +
@@ -1014,13 +1715,13 @@
       '<svg viewBox="0 0 460 112" role="img" aria-label="A scale of speaking pitch in hertz. Below ' +
         '130 hertz listeners reliably hear a voice as male; between 140 and 165 hertz they stop ' +
         'agreeing; above roughly 190 hertz they reliably hear it as female.">' +
-      zone(LO, MASC_F0_CEILING, 'rgba(90,211,154,.22)') +
-      zone(MASC_F0_CEILING, ANDROGYNOUS_LOW, 'rgba(90,211,154,.10)') +
-      zone(ANDROGYNOUS_LOW, ANDROGYNOUS_HIGH, 'rgba(240,180,94,.20)') +
-      zone(ANDROGYNOUS_HIGH, FEM_FLOOR, 'rgba(110,168,255,.06)') +
-      zone(FEM_FLOOR, HI, 'rgba(110,168,255,.16)') +
+      zone(LO, MASC_F0_CEILING, 'rgba(255,207,92,.22)') +
+      zone(MASC_F0_CEILING, ANDROGYNOUS_LOW, 'rgba(255,207,92,.10)') +
+      zone(ANDROGYNOUS_LOW, ANDROGYNOUS_HIGH, 'rgba(245,133,47,.20)') +
+      zone(ANDROGYNOUS_HIGH, FEM_FLOOR, 'rgba(212,59,122,.06)') +
+      zone(FEM_FLOOR, HI, 'rgba(212,59,122,.16)') +
       '<rect x="' + PAD + '" y="30" width="' + (W - PAD * 2) + '" height="30" fill="none" ' +
-        'stroke="var(--line)" rx="4"/>' +
+        'stroke="var(--rule)" rx="4"/>' +
       '<text x="' + x(105).toFixed(1) + '" y="49" fill="var(--good)" font-size="11" ' +
         'text-anchor="middle">reads male</text>' +
       '<text x="' + x(152).toFixed(1) + '" y="49" fill="var(--warn)" font-size="10.5" ' +
@@ -1179,23 +1880,44 @@
   ];
 
   function renderExList() {
+    rollDay();
     var calibrated = base.habitualF0 != null;
+    var next = nextStep();
+
     document.getElementById('exList').innerHTML = EXERCISES.map(function (e) {
       var isCal = e.id === 'calibrate';
-      var locked = !isCal && !calibrated;
+      var inRoutine = ROUTINE.indexOf(e.id) >= 0;
+      var locked = isCal ? false : inRoutine ? stepLocked(e.id) : !calibrated;
+      var done = isCal ? calibrated : (inRoutine && stepDone(e.id));
+      var isNext = e.id === next;
       // "3. Ng slides" -> badge 3, title "Ng slides". Calibration is the
       // prerequisite rather than a numbered step, so it gets a state glyph.
       var m = /^(\d+)\.\s*(.*)$/.exec(e.title);
       var badge = isCal ? (calibrated ? '✓' : '!')
         // A count here would read as a step number beside the numbered drills.
         : e.id === 'progress' ? '↗'
-        : (m ? m[1] : '·');
+        // State replaces the number once there is state to show: a finished
+        // step says so, and a locked one says why, but an untouched step is
+        // still just its place in the routine.
+        : done ? '✓'
+        : locked ? '·'
+        : isNext ? '▶'
+        // Zero-padded, so the column of numbers stays a column.
+        : (m ? ('0' + m[1]).slice(-2) : '·');
       var title = m ? m[2] : e.title;
+      var why = locked && inRoutine && calibrated
+        ? 'Finish step ' + ROUTINE.indexOf(e.id) + ' first'
+        : locked ? 'Calibrate first' : '';
       return '<button class="ex' + (current && current.id === e.id ? ' active' : '') +
-        (isCal && calibrated ? ' done' : '') + '" data-id="' + e.id + '"' +
-        (locked ? ' disabled title="Calibrate first"' : '') + '>' +
+        (done ? ' done' : '') + (isNext ? ' next' : '') + (locked ? ' locked' : '') +
+        '" data-id="' + e.id + '"' +
+        (locked ? ' disabled title="' + why + '"' : '') + '>' +
         '<span class="n" aria-hidden="true">' + badge + '</span>' +
         '<span><span class="t">' + title + '</span><span class="s" style="display:block">' + e.sub + '</span></span>' +
+        // Calibration is "done" without ever having earned XP, so the badge is
+        // tied to the award rather than to the tick beside it.
+        (done && progress.done[e.id] != null
+          ? '<span class="xpb" aria-hidden="true">+' + progress.done[e.id] + '</span>' : '') +
         '</button>';
     }).join('') + (calibrated ? '' :
       '<p class="locked-note">Practice unlocks once you have calibrated — the targets are all derived from your own voice.</p>');
@@ -1214,10 +1936,219 @@
     built.id = id;
     document.getElementById('pane').innerHTML = built.html;
     current = built;
+    stampEyebrow(def);
+    linkTerms(document.getElementById('pane'));
     if (built.mount) built.mount();
     syncMicControls();
     renderExList();
   }
+
+  // Where you are in the routine, above the heading of the first card. It shows
+  // the step number and the one-line descriptor rather than the exercise name,
+  // which the heading underneath is already saying.
+  function stampEyebrow(def) {
+    var h = document.querySelector('#pane .card h3');
+    if (!h) return;
+    var m = /^(\d+)\.\s*(.*)$/.exec(def.title);
+    var eb = document.createElement('div');
+    eb.className = 'eb';
+    eb.innerHTML = '<i>' + (m ? ('0' + m[1]).slice(-2) : def.id === 'calibrate' ? 'CAL' : 'LOG') +
+      '</i>' + def.sub + '<s></s>';
+    h.parentNode.insertBefore(eb, h);
+  }
+
+  // ==========================================================================
+  // glossary
+  //
+  // "Slide down, letting the larynx ride with the pitch" is not an instruction
+  // if you do not know what a larynx is or what moving one feels like. The copy
+  // stays precise and the terms explain themselves instead: each one is linked
+  // once per screen, and opens a definition plus the part a dictionary leaves
+  // out — what the thing feels like from the inside, which is what you actually
+  // practise with.
+  //
+  // Longer names come first: "vocal folds" must win before "folds" can match.
+  // ==========================================================================
+
+  var GLOSSARY = [
+    { name: 'vocal folds', re: /\bvocal folds\b|\bthe folds\b/i,
+      def: 'Two small flaps of muscle and tissue inside the larynx. Air passing between them sets ' +
+           'them vibrating, and that vibration is the sound of your voice. Older name: vocal cords.',
+      feel: 'You cannot feel them directly — what you feel is effort. An easy note is folds ' +
+            'vibrating freely; a strained one is folds being squeezed.' },
+
+    { name: 'vocal tract', re: /\bvocal tract\b/i,
+      def: 'The air space your voice travels through after the folds: throat, mouth and nose. Its ' +
+           'shape decides the character of the sound, while the folds decide the pitch.',
+      feel: 'You change it by moving your tongue, jaw and larynx. Same note, different voice.' },
+
+    { name: 'larynx', re: /\blarynx\b/i,
+      def: 'Your voice box — the lump at the front of your throat that moves when you swallow. The ' +
+           'vocal folds sit inside it.',
+      feel: 'It rides <b>up</b> when you swallow and <b>down</b> at the start of a yawn. Lowering ' +
+            'it lengthens the space above it, which is what makes a voice sound bigger. No change ' +
+            'in pitch required.' },
+
+    { name: 'semi-occluded', re: /\bsemi-occluded\b/i,
+      def: 'Partly blocked. Making sound through a narrow opening — a straw, or a hum — is the ' +
+           'gentlest way there is to exercise a voice.',
+      feel: 'The sound seems to stop at your lips and buzz back into your face. That buzz is the ' +
+            'thing you are after.' },
+
+    { name: 'back-pressure', re: /\bback-pressure\b/i,
+      def: 'The cushion of air that builds up above your vocal folds when the way out is narrowed.',
+      feel: 'It holds the folds slightly apart so they meet more softly — full sound, less ' +
+            'collision, which is why warm-ups are built on it.' },
+
+    { name: 'resonance', re: /\bresonance\b/i,
+      def: 'How large the space above your folds sounds. Shown in centimetres because the number ' +
+           'estimates the length of your vocal tract: a longer tube reads as a bigger, lower voice ' +
+           'at any pitch.',
+      feel: 'Bigger is the direction you want. This is the measure that does the most for how ' +
+            'masculine a voice reads, and unlike pitch it costs your voice nothing.' },
+
+    { name: 'vocal weight', re: /\bvocal weight\b|\bweight\b/i,
+      def: 'How much of each vocal fold takes part in the vibration. Heavier means thicker contact ' +
+           'and a fuller sound; lighter means the thin edges only.',
+      feel: 'Heavy is the rumble you can feel in your sternum. Thin and pressed can hit the same ' +
+            'note but leaves you tired — telling those two apart is the whole job of this meter.' },
+
+    { name: 'pressing', re: /\bpressing\b|\bpressed\b/i,
+      def: 'Forcing a note out by squeezing the folds together harder, instead of letting air do ' +
+           'the work.',
+      feel: 'Tight, effortful, slightly strangled. This is the one to stop for — it is how voice ' +
+            'practice causes injury.' },
+
+    { name: 'intonation', re: /\bintonation\b/i,
+      def: 'How far your pitch travels while you speak, counted in semitones. A smaller number is ' +
+           'a flatter delivery, not a monotone one.',
+      feel: 'Most of the difference lives in the last syllable of a sentence: letting it fall ' +
+            'reads as a statement, letting it rise reads as a question.' },
+
+    { name: 'semitone', re: /\bsemitones?\b/i,
+      def: 'One step on a piano — any key to the key beside it. Pitch differences are counted in ' +
+           'semitones rather than hertz because equal steps sound equal to the ear wherever you ' +
+           'are in your range.',
+      feel: 'Two semitones is a whole step: the first two notes of <i>Frère Jacques</i>.' },
+
+    { name: 'hertz', re: /\bhertz\b/i,
+      def: 'Vibrations per second. 130 Hz means your vocal folds open and close 130 times every ' +
+           'second. Lower number, lower pitch.',
+      feel: 'Speech mostly sits between 85 and 255 Hz.' },
+
+    { name: 'habitual pitch', re: /\bhabitual pitch\b|\bhabitual\b/i,
+      def: 'The pitch you land on without thinking about it — your voice at rest, not your best ' +
+           'voice. Every target here is derived from it.',
+      feel: 'It is measured from you reading aloud normally, which is why calibration asks you not ' +
+            'to perform.' },
+
+    { name: 'comfortable floor', re: /\bcomfortable floor\b|\byour floor\b|\bthe floor\b/i,
+      def: 'The lowest pitch you can make comfortably — measured from your own glides, not assumed.',
+      feel: 'Below it the sound goes creaky and effortful. Targets are always held a margin above ' +
+            'it, and the tool will refuse to set one that is not.' },
+
+    { name: 'median', re: /\bmedians?\b/i,
+      def: 'The middle value: half the measurements came out higher, half lower.',
+      feel: 'Used instead of an average so one squeak, cough or creaky moment cannot move your ' +
+            'score.' },
+
+    { name: 'ambiguous zone', re: /\bambiguous zone\b/i,
+      def: 'Roughly 130–165 Hz — the pitch range where listeners do not reliably hear a voice as ' +
+           'male or female. Below it, pitch alone begins to read as male.',
+      feel: 'Reaching it matters less than resonance and weight do. A voice can read as male from ' +
+            'inside this zone.' },
+
+    { name: 'ng', re: /\/ŋ\/|\bng\b/i,
+      def: 'The sound at the end of <i>sing</i>: tongue against the soft palate, sound leaving ' +
+           'through your nose. Written /ŋ/.',
+      feel: 'Hold it and pinch your nose — the sound stops. That is how you know you have the ' +
+            'right one.' }
+  ];
+
+  var glossBox = null, glossTerm = null;
+
+  function closeGloss() {
+    if (glossTerm) glossTerm.setAttribute('aria-expanded', 'false');
+    if (glossBox) glossBox.hidden = true;
+    glossTerm = null;
+  }
+
+  function openGloss(btn) {
+    var entry = GLOSSARY.filter(function (g) { return g.name === btn.dataset.term; })[0];
+    if (!entry) return;
+    if (!glossBox) {
+      glossBox = document.createElement('div');
+      glossBox.id = 'gloss';
+      glossBox.setAttribute('role', 'dialog');
+      glossBox.setAttribute('aria-label', 'Definition');
+      document.body.appendChild(glossBox);
+    }
+    glossBox.innerHTML = '<div class="gt">' + entry.name + '</div>' +
+      '<div class="gd">' + entry.def + '</div>' +
+      '<div class="gf">' + entry.feel + '</div>';
+    glossBox.hidden = false;
+
+    // Below the word, unless that would run off the bottom of the screen, and
+    // never off either side — on a phone the word is often near an edge.
+    var r = btn.getBoundingClientRect();
+    var vw = document.documentElement.clientWidth;
+    var vh = document.documentElement.clientHeight;
+    var w = glossBox.offsetWidth, h = glossBox.offsetHeight;
+    var below = r.bottom + 8 + h <= vh || r.top - 8 - h < 0;
+    glossBox.style.left = Math.max(8, Math.min(r.left - 10, vw - w - 8)) + window.scrollX + 'px';
+    glossBox.style.top = (below ? r.bottom + 8 : r.top - 8 - h) + window.scrollY + 'px';
+
+    btn.setAttribute('aria-expanded', 'true');
+    glossTerm = btn;
+  }
+
+  // Wraps the first occurrence of each term inside `root`. Once per screen is
+  // enough to explain a word, and underlining every instance turns a paragraph
+  // into a minefield.
+  function linkTerms(root) {
+    if (!root) return;
+    GLOSSARY.forEach(function (entry) {
+      var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      var node;
+      while ((node = walker.nextNode())) {
+        if (!termable(node)) continue;
+        var m = entry.re.exec(node.nodeValue);
+        if (!m) continue;
+        var rest = node.splitText(m.index);
+        rest.nodeValue = rest.nodeValue.slice(m[0].length);
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'term';
+        b.dataset.term = entry.name;
+        b.setAttribute('aria-expanded', 'false');
+        b.title = 'What this means';
+        b.textContent = m[0];
+        rest.parentNode.insertBefore(b, rest);
+        break;
+      }
+    });
+  }
+
+  // Headings and controls stay plain: a definition is for prose, and a word
+  // inside a button cannot become a button of its own.
+  function termable(node) {
+    if (!/\S/.test(node.nodeValue)) return false;
+    for (var el = node.parentNode; el && el !== document.body; el = el.parentNode) {
+      var tag = el.nodeName.toLowerCase();
+      if (tag === 'button' || tag === 'summary' || tag === 'code' || tag === 'svg' ||
+          tag === 'h1' || tag === 'h2' || tag === 'h3' ||
+          (el.classList && el.classList.contains('eb'))) return false;
+    }
+    return true;
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest ? e.target.closest('.term') : null;
+    if (t) { t === glossTerm ? closeGloss() : openGloss(t); return; }
+    if (glossTerm && !(e.target.closest && e.target.closest('#gloss'))) closeGloss();
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeGloss(); });
+  window.addEventListener('resize', closeGloss);
 
   // --- generic live-meter exercise -----------------------------------------
 
@@ -1264,7 +2195,7 @@
       document.getElementById('status').textContent = on ? 'recording — nothing is saved' : '';
     }
 
-    return {
+    var api = {
       html: html,
       mount: function () {
         rib = new Ribbon(document.getElementById('rib'));
@@ -1308,10 +2239,19 @@
             band ? 'aim for 80%' : 'of ' + cfg.goalSeconds + ' s',
             band ? { hit: pct >= 80, fill: pct / 100, markAt: 0.8 }
                  : { hit: secs >= cfg.goalSeconds, fill: secs / cfg.goalSeconds });
+
+          // The step is finished when you have put in the voiced time it asks
+          // for. Accuracy is paid in XP rather than in whether it counts: the
+          // day you can only manage 40% in the band is the day it matters most
+          // that the routine still closes.
+          if (secs >= cfg.goalSeconds) {
+            completeStep(api.id, band ? Math.min(1, pct / 80) : 1);
+          }
         }
         rib.draw(band);
       }
     };
+    return api;
   }
 
   // Shared start/stop row. The button is inert without a microphone rather than
@@ -1395,13 +2335,18 @@
         '<div class="meters">' +
           meter('m-res', 'Resonance', '', true) +
           meter('m-best', 'Best this take') +
+          meter('m-time', 'Voiced time', '', true) +
           '<div class="meter muted"><div class="lab">Pitch</div><div class="val">—</div>' +
             '<div class="sub">hidden for this exercise</div></div>' +
         '</div>' +
         takeControls('Start take') +
       '</div>';
 
-    var cv, g, hist = [], running = false, best = null;
+    // Sighs are short and come in sets, so the goal is accumulated voiced time
+    // across the take rather than one long hold — a minute of yawn-sighs is
+    // eight or ten of them, not one.
+    var GOAL_S = 60;
+    var cv, g, hist = [], running = false, best = null, voicedMs = 0, lastTs = null;
 
     function draw() {
       var r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
@@ -1411,27 +2356,27 @@
       }
       var w = r.width, h = r.height;
       g.clearRect(0, 0, w, h);
-      g.fillStyle = '#0e1016'; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#050508'; g.fillRect(0, 0, w, h);
 
       var lo = 12, hi = 24;
       function y(v) { return h - ((v - lo) / (hi - lo)) * h; }
 
       if (base.resonance != null) {
         var yb = y(base.resonance), yg = y(base.resonance * RESONANCE_GOAL);
-        g.fillStyle = 'rgba(90,211,154,.10)';
+        g.fillStyle = 'rgba(255,207,92,.10)';
         g.fillRect(0, 0, w, yg);
-        g.strokeStyle = 'rgba(90,211,154,.55)'; g.setLineDash([4, 4]);
+        g.strokeStyle = 'rgba(255,207,92,.55)'; g.setLineDash([4, 4]);
         g.beginPath(); g.moveTo(0, yg); g.lineTo(w, yg); g.stroke();
         g.strokeStyle = 'rgba(143,151,173,.45)';
         g.beginPath(); g.moveTo(0, yb); g.lineTo(w, yb); g.stroke();
         g.setLineDash([]);
-        g.fillStyle = 'rgba(90,211,154,.9)'; g.font = '11px system-ui';
+        g.fillStyle = 'rgba(255,207,92,.9)'; g.font = '11px system-ui';
         g.fillText('goal ' + (base.resonance * RESONANCE_GOAL).toFixed(1) + ' cm', 6, yg - 5);
         g.fillStyle = 'rgba(143,151,173,.8)';
         g.fillText('baseline ' + base.resonance.toFixed(1) + ' cm', 6, yb + 13);
       }
 
-      g.strokeStyle = '#6ea8ff'; g.lineWidth = 2.2;
+      g.strokeStyle = RAMP.signal; g.lineWidth = 2.2;
       var drawing = false;
       for (var i = 0; i < hist.length; i++) {
         if (hist[i] == null) { if (drawing) { g.stroke(); drawing = false; } continue; }
@@ -1442,13 +2387,13 @@
     }
 
     function setRunning(el, on) {
-      running = on; hist = []; best = null;
+      running = on; hist = []; best = null; voicedMs = 0; lastTs = null;
       el.textContent = on ? 'Stop' : 'Start take';
       el.className = on ? 'recording' : 'primary';
       document.getElementById('status').textContent = on ? 'recording — nothing is saved' : '';
     }
 
-    return {
+    var api = {
       html: html,
       mount: function () {
         cv = document.getElementById('resCanvas');
@@ -1459,7 +2404,7 @@
       abort: function () {
         if (running) setRunning(document.getElementById('go'), false);
       },
-      frame: function () {
+      frame: function (a, ts) {
         var res = smoothRes.value();
         setMeter('m-res', res ? res.toFixed(1) + ' cm' : '--', resonanceSub(res),
           resonanceMeterOpts(res));
@@ -1470,10 +2415,28 @@
           setMeter('m-best', best != null ? best.toFixed(1) + ' cm' : '--',
             base.resonance != null && best != null
               ? pctVsBaseline(best, base.resonance) + ' above baseline' : '');
+
+          var dt = lastTs == null ? 0 : Math.min(100, ts - lastTs);
+          lastTs = ts;
+          if (a && a.voiced) voicedMs += dt;
+          var secs = voicedMs / 1000;
+          setMeter('m-time', secs.toFixed(0) + ' s', 'of ' + GOAL_S + ' s',
+            { hit: secs >= GOAL_S, fill: secs / GOAL_S });
+
+          if (secs >= GOAL_S) {
+            // Graded on how far the best sigh got from your baseline toward the
+            // resonance goal, which is the only thing this drill measures.
+            var q = 0.5;
+            if (base.resonance != null && best != null) {
+              q = (best - base.resonance) / (base.resonance * (RESONANCE_GOAL - 1));
+            }
+            completeStep(api.id, q);
+          }
           draw();
         }
       }
     };
+    return api;
   }
 
   // --- calibration ----------------------------------------------------------
@@ -1740,6 +2703,9 @@
           setMeter('m-cur', base.safeFloor.toFixed(0) + ' Hz');
           document.getElementById('status').textContent = 'Floor updated — pitch target recalculated.';
           this.disabled = true;
+          // Saving a floor is the whole job of this step: it is the moment the
+          // measurement turns into something the rest of the app uses.
+          completeStep('glide', 1);
         };
       },
       frame: function (a) {
@@ -2047,6 +3013,11 @@
         '<div class="hint">Not saved to <b>Progress</b>: this is a shape rather than a level, and it ' +
         'only means anything against the sentences on this page. The transfer test is whether the ' +
         'endings still land in <b>Free speech</b>, where nothing is prompting you.</div>';
+
+      // Three scored sentences is the least that says anything, and it is the
+      // same bar the report itself uses to agree to print. Graded on how many
+      // landed rather than rose.
+      completeStep('endings', 1 - rises / results.length);
     }
   }
 
@@ -2140,8 +3111,9 @@
       var mRes = resList.length >= MIN_FRAMES_FOR_MEDIAN ? median(resList) : null;
       var mW = weights.length >= MIN_FRAMES_FOR_MEDIAN ? median(weights) : null;
       var sd = semitoneSd(f0s);
-      var rows = [];
+      var rows = [], hits = 0;
       function line(name, val, target, good) {
+        if (good) hits++;
         rows.push('<tr><td>' + name + '</td><td class="num">' + val + '</td><td class="num">' + target +
           '</td><td class="' + (good ? 'ok' : 'no') + '">' + (good ? 'on target' : 'keep working') + '</td></tr>');
       }
@@ -2159,6 +3131,9 @@
         line('Intonation', sd.toFixed(1) + ' st', '≤ ' + base.intonationSd.toFixed(1) + ' st', sd <= base.intonationSd);
       }
       recordTake('passage', { f0: mF0, res: mRes, weight: mW, sd: sd });
+      // Graded on the share of the four measures that landed on target — the
+      // report was already deciding that, so the grade is not a second opinion.
+      completeStep('passage', rows.length ? hits / rows.length : 0.5);
       document.getElementById('report').innerHTML =
         '<table style="margin-top:16px"><tr><th>Measure</th><th>This take</th><th>Target</th><th></th></tr>' +
         rows.join('') + '</table>' +
@@ -2248,6 +3223,11 @@
         '<div class="hint">Spontaneous speech usually sits higher than drilled speech. That gap is the ' +
         'real measure of how far the training has carried. Saved to <b>Progress</b>.</div>';
       document.getElementById('report').innerHTML = html;
+
+      // Free speech has no live meters and sets no pass mark on purpose, so the
+      // grade is the one comparison it does make: pitch against the target.
+      var q = t ? Math.max(0, Math.min(1, 1 - (mF0 - t.hz) / t.hz / 0.25)) : 0.5;
+      completeStep('free', q);
     }
   }
 
@@ -2272,7 +3252,7 @@
   }
 
   var KIND_LABEL = { calibration: 'Calibration', passage: 'Passage', free: 'Free speech' };
-  var KIND_COLOR = { calibration: '#8f97ad', passage: '#6ea8ff', free: '#f0b45e' };
+  var KIND_COLOR = { calibration: RAMP.quiet, passage: RAMP.signal, free: RAMP.high };
 
   function buildProgress() {
     var metrics = progressMetrics().filter(function (m) {
@@ -2336,7 +3316,7 @@
       }
       var w = r.width, h = r.height;
       g.clearRect(0, 0, w, h);
-      g.fillStyle = '#0e1016'; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#050508'; g.fillRect(0, 0, w, h);
       g.font = '11px system-ui';
 
       if (!pts.length) {
@@ -2372,15 +3352,15 @@
 
       if (m.ref != null) {
         var yr = y(m.ref);
-        g.strokeStyle = 'rgba(90,211,154,.55)'; g.setLineDash([4, 4]);
+        g.strokeStyle = 'rgba(255,207,92,.55)'; g.setLineDash([4, 4]);
         g.beginPath(); g.moveTo(padL, yr); g.lineTo(w - padR, yr); g.stroke();
         g.setLineDash([]);
-        g.fillStyle = 'rgba(90,211,154,.9)';
+        g.fillStyle = 'rgba(255,207,92,.9)';
         var lbl = m.refLabel + ' ' + m.ref.toFixed(m.dp) + m.unit;
         g.fillText(lbl, w - padR - g.measureText(lbl).width, yr - 5);
       }
 
-      g.strokeStyle = 'rgba(110,168,255,.75)'; g.lineWidth = 2;
+      g.strokeStyle = 'rgba(212,59,122,.75)'; g.lineWidth = 2;
       g.beginPath();
       pts.forEach(function (p, i) {
         var xx = x(i), yy = y(p[m.id]);
@@ -2389,7 +3369,7 @@
       g.stroke();
 
       pts.forEach(function (p, i) {
-        g.fillStyle = KIND_COLOR[p.kind] || '#6ea8ff';
+        g.fillStyle = KIND_COLOR[p.kind] || RAMP.signal;
         g.beginPath(); g.arc(x(i), y(p[m.id]), 3.5, 0, Math.PI * 2); g.fill();
       });
 
@@ -2490,17 +3470,29 @@
   document.getElementById('resetBtn').onclick = function () {
     // Old takes are scored against the old baseline, so keeping them across a
     // recalibration would put two different reference frames on one chart.
-    if (!confirm('Clear your saved baseline, targets, and all ' + history.length +
-      ' saved takes?')) return;
+    if (!confirm('Clear your saved baseline, targets, all ' + history.length +
+      ' saved takes, and your ' + progress.streak + '-day streak?')) return;
     base = {};
     try { localStorage.removeItem(STORE_KEY); } catch (e) {}
     clearHistory();
+    // The streak is derived from the takes it counted, so leaving it standing
+    // after they are gone would make it a number about nothing.
+    try { localStorage.removeItem(PROGRESS_KEY); } catch (e) {}
+    progress = loadProgress();
+    renderStreak();
     save();
     openExercise('calibrate');
   };
   renderBaseTable();
+  placeStrip();
+  renderStreak();
   renderExList();
-  openExercise(base.habitualF0 == null ? 'calibrate' : 'straw');
+  // The standing safety notice is where "resonance" and "weight" are first
+  // used, so it gets its terms linked too. Panes link their own on open.
+  linkTerms(document.querySelector('.banner.safety'));
+  // Opens where the routine left off rather than always at step one — and on
+  // the log once the day is finished, which is the only thing left to look at.
+  openExercise(base.habitualF0 == null ? 'calibrate' : (nextStep() || 'progress'));
 })();
 </script>
 

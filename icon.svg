@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" rx="112" fill="#12141a"/>
-  <!-- a pitch contour settling downward, which is the whole point of the app -->
+  <rect width="512" height="512" rx="112" fill="#08080c"/>
+  <!-- a pitch contour settling downward, which is the whole point of the app,
+       in the two colours the app uses for it: signal, and signal on target -->
   <path d="M64 176 C 150 176, 190 336, 268 336 S 400 300, 448 300"
-        fill="none" stroke="#6ea8ff" stroke-width="30" stroke-linecap="round"/>
-  <line x1="64" y1="404" x2="448" y2="404" stroke="#5ad39a" stroke-width="22" stroke-linecap="round"/>
+        fill="none" stroke="#d43b7a" stroke-width="30" stroke-linecap="round"/>
+  <line x1="64" y1="404" x2="448" y2="404" stroke="#ffcf5c" stroke-width="22" stroke-linecap="round"/>
 </svg>

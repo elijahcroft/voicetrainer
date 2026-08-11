@@ -3,7 +3,7 @@
 // a fresh copy is fetched in the background for the next launch. Nothing here
 // touches microphone data; audio never leaves the page in the first place.
 
-var CACHE = 'voice-trainer-v1';
+var CACHE = 'voice-trainer-v4';
 var SHELL = [
   './',
   './index.html',
