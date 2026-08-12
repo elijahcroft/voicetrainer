@@ -3,17 +3,15 @@
 // a fresh copy is fetched in the background for the next launch. Nothing here
 // touches microphone data; audio never leaves the page in the first place.
 
-var CACHE = 'voice-trainer-v4';
-var SHELL = [
-  './',
-  './index.html',
-  './dsp.js',
-  './manifest.webmanifest',
-  './icon-192.png',
-  './icon-512.png',
-  './icon-maskable-512.png',
-  './apple-touch-icon.png'
-];
+// Everything between the two markers is replaced at build time by the plugin in
+// vite.config.js, which knows the content-hashed filenames this build produced.
+// The values below are only what an unbuilt copy of this file would use; the
+// page registers a service worker in production builds alone, so they are never
+// what ships.
+// build:shell-start
+var CACHE = 'voice-trainer-dev';
+var SHELL = ['./', './index.html'];
+// build:shell-end
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); })

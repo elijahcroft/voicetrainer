@@ -1,0 +1,51 @@
+# Builds the app and publishes dist/ to GitHub Pages.
+#
+# The repo root holds source, not a servable site — index.html is a shell that
+# points at src/main.js, which only means anything after a build. So Pages is
+# fed from an artifact rather than from a branch, and the Pages setting has to
+# be Source: GitHub Actions (not "Deploy from a branch").
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, but never cancel one that is already publishing.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # The suites are pure Node and take about a second between them, so a
+      # broken measurement never reaches the published site.
+      - run: npm test
+      - run: npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
