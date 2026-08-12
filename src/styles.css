@@ -1,16 +1,10 @@
 /* ------------------------------------------------------------------------
-   Look: a spectrogram.
+   Core instrument theme.
 
-   The field is the near-black floor of an analysis window, every surface is
-   flat and matte, and the only colour in the entire interface is the energy
-   ramp a spectrogram uses — magenta where there is little, amber where it
-   peaks. That ramp is not decoration: it is the state. Off your target reads
-   magenta, on target reads amber, and it means the same thing on the live
-   trace, the meter bars, the ending chips and the progress dots. Everything
-   else is graphite, so the one thing that carries colour is your voice.
-
-   Labels are monospaced small-caps because this is an instrument, and the
-   numbers are the point; headings are the only place with any weight to them.
+   The live traces retain their dark spectrogram field and energy ramp so
+   measurements stay high-contrast and consistent. Responsive sections later
+   in the sheet place those instruments inside the warmer coaching interface
+   shared by desktop and mobile.
    ------------------------------------------------------------------------ */
 :root {
   --ink: #08080c;          /* the field */
@@ -416,6 +410,126 @@ header { padding-top: calc(12px + env(safe-area-inset-top));
          padding-right: calc(20px + env(safe-area-inset-right)); }
 .layout { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
 
+/* Desktop shares the phone's coaching identity while retaining the denser
+   sidebar workspace that makes sense with a keyboard and a wide display.
+   Analysis canvases stay dark: they are signal views, not page surfaces. */
+@media (min-width: 701px) {
+  :root {
+    --ink: #f5f3ef;
+    --ink-2: #fffdf9;
+    --ink-3: #eeece8;
+    --rule: #dfdcd5;
+    --rule-2: #cbc7bf;
+    --text: #292832;
+    --dim: #716f78;
+    --dimmer: #9b98a1;
+  }
+  body { line-height: 1.55; }
+  button {
+    border-radius: 9px; font-weight: 600; background: var(--ink-3);
+    box-shadow: none;
+  }
+  button:hover:not(:disabled) { border-color: #aaa6b0; background: #e6e3de; }
+  button.primary {
+    color: #fff; background: #5752a3; border-color: #5752a3;
+    box-shadow: 0 2px 8px rgba(87,82,163,.18);
+  }
+  button.primary:hover:not(:disabled) { color: #fff; background: #49458d; border-color: #49458d; }
+  button.recording { color: #fff; background: #d7654c; border-color: #d7654c; }
+  :focus-visible { outline-color: #5752a3; border-radius: 9px; }
+
+  header {
+    min-height: 66px; padding-top: calc(12px + env(safe-area-inset-top));
+    background: rgba(255,253,249,.94); border-bottom-color: var(--rule);
+    backdrop-filter: blur(12px);
+  }
+  header h1 {
+    color: #5752a3; font: 750 18px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+    letter-spacing: -.03em; text-transform: none;
+  }
+  .mic-state { border-radius: 8px; background: #f3f1ed; }
+  .mic-state.live { color: #2f8f83; border-color: #a8d5ce; }
+  .dot.on { background: #2f8f83; box-shadow: 0 0 0 0 rgba(47,143,131,.35); }
+  .strip {
+    color: var(--dim); background: transparent; border: 0; border-left: 1px solid var(--rule);
+    border-radius: 0; padding: 3px 0 3px 14px;
+  }
+  .strip .sg.live { color: #d7654c; }
+  .strip .sg.live b { color: #d7654c; }
+  .strip .gd { width: 11px; height: 4px; border: 0; border-radius: 2px; background: var(--rule); }
+  .strip .gd.on, .strip .gdots.met .gd.on { background: #2f8f83; }
+  .strip .gdots.met em { color: #2f8f83; }
+  .strip .xp { color: #5752a3; }
+
+  .layout { max-width: 1320px; grid-template-columns: 270px minmax(0, 1fr); gap: 24px; padding-top: 24px; }
+  nav, aside.numbers {
+    background: var(--ink-2); border: 1px solid var(--rule); border-radius: 15px;
+    padding: 17px 14px 14px; box-shadow: 0 8px 24px rgba(54,49,72,.05);
+  }
+  nav h2, aside.numbers h2 {
+    margin: 0 8px 13px; color: var(--text); font: 700 16px/1.2 system-ui, sans-serif;
+    text-transform: none; letter-spacing: -.015em;
+  }
+  .ex {
+    align-items: center; gap: 10px; min-height: 56px; padding: 8px 9px;
+    margin-bottom: 5px; border: 1px solid transparent; border-radius: 10px;
+  }
+  .ex:hover:not(:disabled) { background: #f5f3ef; border-color: transparent; }
+  .ex.active { background: #efeffa; border-color: #d8d6ef; }
+  .ex.active::before { display: none; }
+  .ex .n {
+    display: grid; place-items: center; flex: 0 0 32px; width: 32px; height: 32px; margin: 0;
+    color: var(--dim); background: #e5e2dc; border-radius: 8px; font-weight: 700;
+  }
+  .ex.active .n, .ex.next .n { color: #fff; background: #5752a3; }
+  .ex.done .n { color: #246e65; background: #dceeea; }
+  .ex .t { font-size: 13px; font-weight: 650; }
+  .ex .s { font-size: 11.5px; }
+  .ex .xpb { color: #2f8f83; }
+  .locked-note { margin: 10px 8px 2px; }
+
+  aside.numbers { padding-bottom: 8px; }
+  aside.numbers .card {
+    padding: 0 !important; border: 0; box-shadow: none; background: transparent;
+  }
+  .card {
+    background: var(--ink-2); border-color: var(--rule); border-radius: 15px;
+    box-shadow: 0 8px 24px rgba(54,49,72,.05);
+  }
+  .card h3 { font-size: 22px; font-weight: 720; }
+  .eb { color: #5752a3; }
+  .eb i { color: #5752a3; font-weight: 700; }
+  .why { font-size: 14px; }
+  .explain > summary { color: #5752a3; font-weight: 650; }
+
+  .meter { border-color: transparent; border-radius: 10px; }
+  .meter.hit { border-color: #9acfc7; }
+  .meter.hit .val { color: #2f8f83; }
+  .bar { background-color: #dedbd5; }
+  .bar > u { background: #292832; }
+  .passage { color: var(--text); background: #f3f1ed; border-color: var(--rule); border-radius: 11px; }
+  .stack { color: var(--text); background: #f3f1ed; border-radius: 11px; }
+  .verdict { background: var(--ink-3); }
+  .chip { border-radius: 7px; }
+
+  .banner { border-radius: 11px; }
+  .banner.safety {
+    color: var(--dim); background: #fff9f6; border-color: #ead8d1; border-left-color: #d7654c;
+  }
+  .banner.safety summary span {
+    color: #b6513b; background: #f7e6e0; border-radius: 5px; padding: 2px 5px;
+    font: 750 8px/1.3 system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase;
+  }
+  .banner.info { color: var(--dim); background: #f0eff8; border-color: #d8d6ef; border-left-color: #5752a3; }
+  .banner.err { color: #93412f; background: #fff4f0; border-color: #edc8bd; border-left-color: #d7654c; }
+  .term:hover, .term[aria-expanded="true"] { color: #5752a3; border-bottom-color: #5752a3; }
+  #gloss { border-radius: 11px; box-shadow: 0 14px 34px rgba(54,49,72,.16); }
+  #gloss .gt { color: #5752a3; }
+  .sum-back { background: rgba(41,40,50,.48); }
+  .sum { box-shadow: 0 18px 60px rgba(54,49,72,.2); }
+  .sum-stats b, .sum-steps li::before { color: #2f8f83; }
+}
+
 @media (max-width: 860px) {
   .layout {
     padding: 14px 12px 40px; gap: 16px;
@@ -448,9 +562,8 @@ header { padding-top: calc(12px + env(safe-area-inset-top));
    screen the pill shrinks to its status dot and the bar stays one line. */
 @media (max-width: 700px) {
   :root {
-    /* Mobile is a focused coaching surface: warm paper, ink and indigo. The
-       palette is deliberately separate from both the desktop spectrogram and
-       familiar green gamified-learning UIs. Measurement colours retain their
+    /* Mobile uses the same warm paper, ink and indigo system as desktop, in a
+       more focused one-column composition. Measurement colours retain their
        original meaning inside traces and diagrams. */
     --ink: #f5f3ef;
     --ink-2: #fffdf9;
