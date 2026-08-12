@@ -448,27 +448,28 @@ header { padding-top: calc(12px + env(safe-area-inset-top));
    screen the pill shrinks to its status dot and the bar stays one line. */
 @media (max-width: 700px) {
   :root {
-    /* Phones are a lesson app, not a miniature analysis console. The lighter
-       palette and saturated green action mirror the calm, playful hierarchy
-       of language-learning apps while all measurement colours keep their
+    /* Mobile is a focused coaching surface: warm paper, ink and indigo. The
+       palette is deliberately separate from both the desktop spectrogram and
+       familiar green gamified-learning UIs. Measurement colours retain their
        original meaning inside traces and diagrams. */
-    --ink: #f7f7f7;
-    --ink-2: #ffffff;
-    --ink-3: #f1f3f5;
-    --rule: #e5e5e5;
-    --rule-2: #d7d7d7;
-    --text: #3c3c3c;
-    --dim: #777777;
-    --dimmer: #a5a5a5;
+    --ink: #f5f3ef;
+    --ink-2: #fffdf9;
+    --ink-3: #eeece8;
+    --rule: #dfdcd5;
+    --rule-2: #cbc7bf;
+    --text: #292832;
+    --dim: #716f78;
+    --dimmer: #9b98a1;
   }
   body { line-height: 1.5; }
   header { gap: 9px;
            padding: calc(9px + env(safe-area-inset-top)) calc(13px + env(safe-area-inset-right))
                     9px calc(13px + env(safe-area-inset-left));
-           background: #fff; border-bottom: 2px solid var(--rule); }
+           background: rgba(255,253,249,.94); border-bottom: 1px solid var(--rule);
+           backdrop-filter: blur(12px); }
   header h1 {
-    font: 800 18px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
-    letter-spacing: -.03em; text-transform: none; color: #58a700;
+    font: 750 18px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+    letter-spacing: -.03em; text-transform: none; color: #5752a3;
   }
   .mic-state { display: none; }
   /* The full title plus both controls is ~15px too wide for a 375px phone,
@@ -478,14 +479,15 @@ header { padding-top: calc(12px + env(safe-area-inset-top));
   /* 44px is the smallest square a thumb hits reliably. Glossary terms are
      excluded: they are words inside a sentence, not controls. */
   button:not(.term) { min-height: 44px; padding: 10px 15px; }
-  button { border-radius: 12px; font-weight: 650; }
+  button { border-radius: 10px; font-weight: 650; }
   button.primary {
-    color: #fff; background: #58cc02; border: 0; border-bottom: 4px solid #58a700;
-    padding-bottom: 8px; text-transform: uppercase; letter-spacing: .04em;
+    color: #fff; background: #5752a3; border: 1px solid #5752a3;
+    padding-bottom: 10px; text-transform: none; letter-spacing: 0;
+    box-shadow: 0 2px 8px rgba(87,82,163,.2);
   }
-  button.primary:hover:not(:disabled) { color: #fff; background: #61d909; border-color: #58a700; }
+  button.primary:hover:not(:disabled) { color: #fff; background: #49458d; border-color: #49458d; }
   button.recording {
-    color: #fff; background: #ff4b4b; border-color: #ea2b2b; border-bottom-width: 4px;
+    color: #fff; background: #d7654c; border-color: #d7654c; box-shadow: none;
   }
   /* Reset is rare and destructive: reachable, but not competing for width
      with the control pressed at the start of every session. */
@@ -499,80 +501,91 @@ header { padding-top: calc(12px + env(safe-area-inset-top));
      fuller than the desktop version rather than thinner. */
   .layout { padding: 16px 12px 92px; gap: 14px; max-width: 560px; }
   nav {
-    background: #fff; border: 2px solid var(--rule); border-radius: 20px;
-    padding: 16px 14px 13px; box-shadow: 0 3px 0 var(--rule);
+    background: var(--ink-2); border: 1px solid var(--rule); border-radius: 16px;
+    padding: 15px 14px 13px; box-shadow: 0 8px 24px rgba(54,49,72,.06);
   }
   nav h2 {
-    margin: 0 0 10px; color: var(--text); font: 750 18px/1.2 system-ui, sans-serif;
+    margin: 0 0 12px; color: var(--text); font: 700 17px/1.2 system-ui, sans-serif;
     letter-spacing: -.02em; text-transform: none;
   }
   .desktop-label { display: none; }
   .mobile-label { display: inline; }
   .strip {
-    width: 100%; justify-content: flex-start; gap: 16px; border: 0;
-    border-bottom: 2px solid var(--rule); border-radius: 0; background: transparent;
-    padding: 0 0 12px; margin-bottom: 11px; font: 700 13px/1 system-ui, sans-serif;
+    width: 100%; justify-content: flex-start; gap: 18px; border: 0;
+    border-bottom: 1px solid var(--rule); border-radius: 0; background: transparent;
+    padding: 0 0 11px; margin-bottom: 11px; font: 650 12px/1 system-ui, sans-serif;
     letter-spacing: 0;
   }
-  .strip .sg b { font-size: 0; }
-  .strip .sg b::before { content: '🔥'; font-size: 16px; }
-  .strip .sg.live, .strip .sg.live b { color: #ff9600; }
-  .strip .gd { width: 9px; height: 9px; border-width: 2px; }
-  .strip .gd.on { background: #58cc02; border-color: #58cc02; }
-  .strip .gdots.met .gd.on { background: #58cc02; border-color: #58cc02; }
-  .strip .gdots.met em { color: #58a700; }
-  .strip .xp { color: #1cb0f6; }
-  .strip .xp { margin-left: auto; }
-  .strip .mute { min-height: 0; }
-
-  /* A compact lesson path replaces the row of desktop cards. The big round
-     nodes are easy to hit with a thumb; descriptions and XP badges disappear
-     because they are secondary at this point in the journey. */
-  #exList { margin: 0 -14px; padding: 2px 14px 3px; gap: 12px; }
-  #exList .ex {
-    width: 76px; min-width: 76px; max-width: 76px; padding: 2px 0;
-    flex-direction: column; align-items: center; gap: 7px; text-align: center;
-    background: transparent; border: 0; border-radius: 14px;
+  .strip .sg, .strip .gdots, .strip .xp { position: relative; padding-top: 13px; }
+  .strip .sg { min-width: 44px; }
+  .strip .gdots { min-width: 88px; }
+  .strip .xp { min-width: 36px; }
+  .strip .sg::before, .strip .gdots::before, .strip .xp::before {
+    position: absolute; top: 0; left: 0; color: var(--dimmer);
+    font-size: 8px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase;
   }
-  #exList .ex:hover:not(:disabled) { background: transparent; border: 0; }
+  .strip .sg::before { content: 'Streak'; }
+  .strip .gdots::before { content: 'Today'; }
+  .strip .xp::before { content: 'Total'; }
+  .strip .sg b { display: none; }
+  .strip .sg.live { color: #d7654c; }
+  .strip .gd { width: 12px; height: 4px; border: 0; border-radius: 2px; background: var(--rule); }
+  .strip .gd.on, .strip .gdots.met .gd.on { background: #2f8f83; }
+  .strip .gdots.met em { color: #2f8f83; }
+  .strip .xp { color: #5752a3; margin-left: 0; }
+  .strip .mute { min-height: 0; margin-left: auto; color: var(--dim); }
+
+  /* The routine becomes compact horizontal tabs: still lesson-first and easy
+     to scan, but without the circular map metaphor of game-like path UIs. */
+  #exList { margin: 0 -14px; padding: 2px 14px 4px; gap: 8px; }
+  #exList .ex {
+    width: 112px; min-width: 112px; max-width: 112px; min-height: 58px; padding: 8px 9px;
+    flex-direction: row; align-items: center; gap: 8px; text-align: left;
+    background: #f5f3ef; border: 1px solid transparent; border-radius: 11px;
+  }
+  #exList .ex:hover:not(:disabled) { background: #eeece8; border-color: transparent; }
+  #exList .ex.active { background: #efeffa; border-color: #d8d6ef; }
   #exList .ex.active::before { display: none; }
   #exList .ex .n {
-    display: grid; place-items: center; width: 52px; height: 48px; margin: 0;
-    color: #777; background: #e5e5e5; border-radius: 50%;
-    border-bottom: 4px solid #cfcfcf; font: 800 14px/1 system-ui, sans-serif;
+    display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; margin: 0;
+    color: var(--dim); background: #e5e2dc; border-radius: 8px;
+    border: 0; font: 750 11px/1 system-ui, sans-serif;
   }
   #exList .ex.next .n, #exList .ex.active .n {
-    color: #fff; background: #58cc02; border-color: #58a700;
+    color: #fff; background: #5752a3;
   }
-  #exList .ex.done .n { color: #58a700; background: #d7ffb8; border-color: #b8e98f; }
-  #exList .ex .t { display: block; font-size: 11px; line-height: 1.15; color: #777; }
+  #exList .ex.done .n { color: #246e65; background: #dceeea; }
+  #exList .ex .t { display: block; font-size: 11px; line-height: 1.2; color: var(--dim); }
   #exList .ex.next .t, #exList .ex.active .t { color: var(--text); font-weight: 750; }
   #exList .ex .s, #exList .ex .xpb { display: none !important; }
   .locked-note { margin: 10px 2px 0; line-height: 1.35; }
 
   main { display: flex; flex-direction: column; }
   .banner.safety {
-    order: 1; color: #777; background: #fff; border: 2px solid var(--rule);
-    border-left-width: 2px; border-radius: 16px; padding: 11px 13px;
+    order: 1; color: var(--dim); background: var(--ink-2); border: 1px solid var(--rule);
+    border-left-width: 1px; border-radius: 12px; padding: 11px 13px;
   }
-  .banner.safety summary { color: #777; }
-  .banner.safety summary span { color: #ff4b4b; }
+  .banner.safety summary { color: var(--dim); }
+  .banner.safety summary span {
+    color: #b6513b; background: #f7e6e0; border-radius: 5px; padding: 2px 5px;
+    font: 750 8px/1.3 system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase;
+  }
   .banner.safety > div { line-height: 1.45; }
   #errBox { order: 2; }
   #pane { order: 0; }
   .card {
-    padding: 19px 17px; margin-bottom: 14px; background: #fff;
-    border: 2px solid var(--rule); border-radius: 20px; box-shadow: 0 3px 0 var(--rule);
+    padding: 19px 17px; margin-bottom: 14px; background: var(--ink-2);
+    border: 1px solid var(--rule); border-radius: 16px; box-shadow: 0 8px 24px rgba(54,49,72,.05);
   }
-  .card h3 { font-size: 23px; line-height: 1.2; font-weight: 800; letter-spacing: -.025em; }
-  .eb { border-bottom: 0; padding-bottom: 1px; margin-bottom: 8px; color: #58a700; }
-  .eb i { color: #58a700; font-weight: 800; }
+  .card h3 { font-size: 22px; line-height: 1.2; font-weight: 750; letter-spacing: -.025em; }
+  .eb { border-bottom: 0; padding-bottom: 1px; margin-bottom: 8px; color: #5752a3; }
+  .eb i { color: #5752a3; font-weight: 750; }
   .eb s { background: var(--rule); }
-  .why { color: #777; font-size: 14px; line-height: 1.5; margin-bottom: 13px; }
+  .why { color: var(--dim); font-size: 14px; line-height: 1.5; margin-bottom: 13px; }
   .note { font-size: 13px; }
   .steps { padding-left: 19px; }
-  .explain > summary { color: #1cb0f6; font-weight: 700; }
-  .passage { padding: 14px 15px; font-size: 16px; background: #f7f7f7; border-radius: 14px; }
+  .explain > summary { color: #5752a3; font-weight: 700; }
+  .passage { padding: 14px 15px; font-size: 16px; background: #f3f1ed; border-radius: 12px; }
   .stack .prompt { padding: 13px 15px 14px; }
   .stack .prompt .say { font-size: 18px; }
   .stack canvas { height: 152px; }
@@ -582,7 +595,7 @@ header { padding-top: calc(12px + env(safe-area-inset-top));
      corner of your eye while you speak, so a legible number beats fitting
      one more box on the line. */
   .meters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .meter { padding: 10px 11px 12px; border: 0; border-radius: 14px; }
+  .meter { padding: 10px 11px 12px; border: 0; border-radius: 11px; }
   .meter .val { font-size: 22px; }
   table { font-size: 13px; }
   td, th { padding: 7px 8px; }
