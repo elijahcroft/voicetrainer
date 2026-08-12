@@ -1,5 +1,9 @@
 import { beginTake, smoothF0, smoothRes, smoothWeight } from '../audio/engine.js';
-import { RESONANCE_GOAL } from '../constants.js';
+import { alignTranscript, flagPhrases } from '../analysis/speech-flags.js';
+import { setTranscription, transcription } from '../analysis/transcribe.js';
+import { CREAK_APERIODICITY, CREAK_MIN_MS, CREAK_OFF, CREAK_ON, CREAK_WINDOW_MS,
+         RESONANCE_GOAL, TRANSCRIPT_SETTLE_MS } from '../constants.js';
+import { renderTranscript } from '../ui/transcript.js';
 import { completeStep } from '../progress/state.js';
 import { base } from '../store/baseline.js';
 import { targetBand } from '../targets.js';
@@ -37,10 +41,21 @@ export function simpleExercise(cfg) {
         meter('m-weight', 'Weight') +
         meter('m-time', cfg.showBand ? 'In target' : 'Voiced time', '', true) +
       '</div>' +
+      '<div class="banner rest" id="creakNote" hidden>' +
+        '<b>That is creak, not a note.</b>' +
+        'The folds are rattling rather than vibrating — which hits the number without your voice ' +
+        'ever learning to make it. Come up a few hertz and find the pitch you can actually hold.' +
+      '</div>' +
       takeControls('Start take') +
     '</div>';
 
   var rib, running = false, inBandMs = 0, voicedMs = 0, band = null, lastTs = null, scored = false;
+  // Rolling creak fraction over the last few seconds of voiced sound. This is
+  // the same threshold calibration uses to refuse to measure a creaky frame —
+  // the difference is that this one says so out loud, because "your low note
+  // is actually fry" is the single most useful thing a drill can tell you and
+  // until now the tool knew it and kept quiet.
+  var creak = [], creakMs = 0, creaking = false;
 
   function setRunning(el, on) {
     running = on;
@@ -84,6 +99,8 @@ export function simpleExercise(cfg) {
       var dt = lastTs == null ? 0 : Math.min(100, ts - lastTs);
       lastTs = ts;
 
+      updateCreak(a, ts, dt);
+
       if (running) {
         rib.push(a.voiced ? f0 : 0);
         if (a.voiced && f0) {
@@ -115,6 +132,28 @@ export function simpleExercise(cfg) {
       rib.draw(band);
     }
   };
+
+  // Two thresholds rather than one: a single one at 60% flickers the warning
+  // on and off around the boundary, which is how a warning stops being read.
+  function updateCreak(a, ts, dt) {
+    if (a.voiced) {
+      creak.push({ t: ts, dt: dt, creaky: a.aperiodicity >= CREAK_APERIODICITY ? 1 : 0 });
+      creakMs += dt;
+    }
+    var cutoff = ts - CREAK_WINDOW_MS;
+    while (creak.length && creak[0].t < cutoff) creakMs -= creak.shift().dt;
+
+    var note = document.getElementById('creakNote');
+    if (!note) return;
+    if (creakMs < CREAK_MIN_MS) { note.hidden = true; creaking = false; return; }
+    var bad = 0;
+    for (var i = 0; i < creak.length; i++) if (creak[i].creaky) bad += creak[i].dt;
+    var frac = bad / creakMs;
+    if (frac >= CREAK_ON) creaking = true;
+    else if (frac < CREAK_OFF) creaking = false;
+    note.hidden = !creaking;
+  }
+
   return api;
 }
 
@@ -128,10 +167,74 @@ export function takeControls(label, extra) {
     '</div>' + micHint();
 }
 export function micHint() {
+  // "Nothing is uploaded" was unqualified until transcription existed. It is
+  // still true of every measurement — but it is no longer true of the whole
+  // page once the transcript switch is on, and a privacy claim that quietly
+  // stops holding is worse than no claim.
   return '<div class="banner info compact" id="micHint" hidden style="margin:12px 0 0">' +
     '<span aria-hidden="true">🎙</span><span>Press <b>Start microphone</b> in the top bar to enable this ' +
-    'exercise. Nothing is uploaded or recorded — every frame is analysed and discarded.</span>' +
+    'exercise. Nothing is recorded — every frame is analysed and discarded' +
+    (transcription.enabled ? ', though transcription is switched on and sends audio to your ' +
+      'browser vendor while a take runs' : '') + '.</span>' +
     '</div>';
+}
+
+// --- transcription switch -------------------------------------------------
+//
+// Off until turned on, and the switch says where the audio goes rather than
+// linking to somewhere that says it. This is the only part of the app that
+// leaves the device, so it is the one place the interface is allowed to be
+// wordy.
+export function transcriptToggle() {
+  if (!transcription.supported) {
+    return '<div class="banner info compact" style="margin:14px 0 0">' +
+      '<span aria-hidden="true">✎</span><span>This browser has no speech recognition, so takes ' +
+      'here cannot be transcribed. Chrome and Safari do.</span></div>';
+  }
+  return '<label class="banner info compact tx-switch" style="margin:14px 0 0">' +
+    '<input type="checkbox" id="txOn"' + (transcription.enabled ? ' checked' : '') + '>' +
+    '<span><b>Transcribe this take and mark what went wrong.</b> Shows the words you said with ' +
+    'rises, stretched endings, creak and filler words written against the phrase they happened in — ' +
+    'and it is the only way the tool can tell a question apart from uptalk. ' +
+    '<b>This one feature is not on-device:</b> while a take is running your browser streams the ' +
+    'audio to its vendor’s speech servers to do the recognition. Nothing else here does that, and ' +
+    'this stays off until you switch it on.</span></label>';
+}
+
+// Both speaking drills mount the switch the same way, and both need the take
+// button to know whether a transcript is coming.
+export function mountTranscriptToggle(onChange) {
+  var box = document.getElementById('txOn');
+  if (!box) return;
+  box.onchange = function () {
+    setTranscription(box.checked);
+    var hint = document.getElementById('micHint');
+    if (hint) hint.outerHTML = micHint();
+    if (onChange) onChange();
+  };
+}
+
+// The recogniser finalises an utterance a beat after the speech that produced
+// it, so a transcript rendered the instant the button is released is missing
+// its own last sentence. The panel says it is waiting rather than appearing
+// half-built.
+export function renderTranscriptInto(el, tracker, rec, expected) {
+  if (!rec || !transcription.enabled) return;
+  el.innerHTML = '<div class="hint" id="txWait">Transcribing…</div>';
+  // Stopping is what makes the recogniser flush its last utterance, so it goes
+  // first and the wait is for that flush to arrive.
+  rec.stop();
+  setTimeout(function () {
+    // The pane can be gone by now — a drill switched, a take aborted.
+    if (!el.isConnected) return;
+    if (rec.error) {
+      el.innerHTML = '<div class="banner err" style="margin-top:14px">' + rec.error + '</div>';
+      return;
+    }
+    var phrases = alignTranscript(tracker.phrases, rec.utterances);
+    flagPhrases(phrases, { band: targetBand(), baselineSd: base.intonationSd });
+    el.innerHTML = renderTranscript(phrases, { expected: expected });
+  }, TRANSCRIPT_SETTLE_MS);
 }
 
 export function resonanceSub(res) {

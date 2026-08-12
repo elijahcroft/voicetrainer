@@ -1,4 +1,5 @@
 import DSP from '../dsp.js';
+import { pushStrain, resetStrain, strainWarning } from '../analysis/strain.js';
 import { analysisDue, resetAnalysisClock } from './clock.js';
 import { current } from '../exercises/registry.js';
 import { chime, pendingChime, takeRunning } from '../progress/reward.js';
@@ -106,6 +107,13 @@ export async function startMic() {
   audio.starting = false;
   audio.running = true;
   resetSmoothers();
+  // Deliberately not inside resetSmoothers(): that runs on every exercise
+  // change, and a session's worth of voice quality must survive switching
+  // drills. Only turning the microphone off ends a session.
+  resetStrain();
+  lastAnalysisTs = null;
+  var startNote = document.getElementById('strainNote');
+  if (startNote) startNote.hidden = true;
   resetAnalysisClock();
   setMicUI(true, Math.round(audio.ctx.sampleRate / 1000) + ' kHz, listening');
   requestAnimationFrame(loop);
@@ -118,6 +126,8 @@ export function stopMic() {
   if (audio.ctx) audio.ctx.close();
   audio.ctx = audio.analyser = audio.stream = null;
   resetSmoothers();
+  resetStrain();
+  lastAnalysisTs = null;
   // A take cannot continue without audio. Ending it here stops the exercise
   // sitting there labelled "recording" while nothing is being measured.
   if (current && current.abort) current.abort();
@@ -126,6 +136,10 @@ export function stopMic() {
   // stopped — so drain here too rather than leaving one owed indefinitely.
   if (pendingChime) chime(pendingChime);
 }
+
+// Wall-clock spacing between analysed frames, for anything accumulating time
+// rather than counting frames.
+var lastAnalysisTs = null;
 
 function loop(ts) {
   if (!audio.running) return;
@@ -140,6 +154,15 @@ function loop(ts) {
   audio.analyser.getFloatTimeDomainData(audio.buf);
   var a = DSP.analyze(audio.buf, audio.ctx.sampleRate);
   latest = a;
+
+  // Voice quality watches the whole time the microphone is on, not just takes:
+  // the session is what tires a voice, and the drill you happen to be in when
+  // it starts to go is not the point.
+  var dt = lastAnalysisTs == null ? 0 : ts - lastAnalysisTs;
+  lastAnalysisTs = ts;
+  pushStrain(a, ts, dt);
+  var note = document.getElementById('strainNote');
+  if (note) note.hidden = !strainWarning();
 
   if (a.voiced) {
     unvoicedRun = 0;

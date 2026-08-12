@@ -1,7 +1,10 @@
 import { beginTake, intonation, smoothF0, smoothRes, smoothWeight } from '../audio/engine.js';
+import { PhraseTracker } from '../analysis/phrases.js';
+import { Recognizer, transcription } from '../analysis/transcribe.js';
 import { MIN_FRAMES_FOR_MEDIAN, MIN_VOICED_MS_SCORE, RESONANCE_GOAL } from '../constants.js';
 import { PASSAGE } from './registry.js';
-import { resonanceMeterOpts, resonanceSub, takeControls, weightLabel, weightSub } from './shared.js';
+import { mountTranscriptToggle, renderTranscriptInto, resonanceMeterOpts, resonanceSub,
+         takeControls, transcriptToggle, weightLabel, weightSub } from './shared.js';
 import { completeStep } from '../progress/state.js';
 import { base } from '../store/baseline.js';
 import { recordTake } from '../store/history.js';
@@ -27,12 +30,15 @@ export function buildPassage() {
       '</div>' +
       '<div class="meters">' + meter('m-pitch', 'Pitch', '', true) + meter('m-res', 'Resonance', '', true) +
         meter('m-weight', 'Weight') + meter('m-int', 'Intonation') + '</div>' +
+      transcriptToggle() +
       takeControls('Start take') +
       '<div id="report"></div>' +
+      '<div id="transcript"></div>' +
     '</div>';
 
   var rib, running = false, f0s = [], resList = [], weights = [], band = null;
   var voicedMs = 0, lastTs = null;
+  var tracker = new PhraseTracker(), rec = null;
 
   function setRunning(el, on, score) {
     running = on;
@@ -41,12 +47,26 @@ export function buildPassage() {
     if (on) {
       f0s = []; resList = []; weights = []; rib.pts = [];
       voicedMs = 0; lastTs = null;
-      beginTake();
+      tracker.reset();
+      rec = new Recognizer();
+      rec.start();
       document.getElementById('report').innerHTML = '';
-      document.getElementById('status').textContent = 'recording — audio is never saved';
+      document.getElementById('transcript').innerHTML = '';
+      beginTake();
+      document.getElementById('status').textContent = transcription.enabled
+        ? 'recording — audio is never saved, but is being sent for transcription'
+        : 'recording — audio is never saved';
     } else {
+      // The phrase you were still finishing when you pressed Stop is a phrase.
+      tracker.end();
       document.getElementById('status').textContent = '';
-      if (score) report();
+      if (score) {
+        report();
+        renderTranscriptInto(document.getElementById('transcript'), tracker, rec, PASSAGE);
+      } else if (rec) {
+        rec.stop();
+      }
+      rec = null;
     }
   }
 
@@ -68,6 +88,7 @@ export function buildPassage() {
       band = targetBand();
       rib.draw(band);
       document.getElementById('go').onclick = function () { setRunning(this, !running, true); };
+      mountTranscriptToggle();
     },
     frame: function (a, ts) {
       var f0 = smoothF0.value();
@@ -86,6 +107,10 @@ export function buildPassage() {
         // included the previous frame's canvas work in this take's voiced time.
         var dt = lastTs == null ? 0 : Math.min(100, ts - lastTs);
         lastTs = ts;
+        // Phrase-by-phrase, alongside the whole-take medians. The two answer
+        // different questions: the table says how the reading went, the
+        // transcript says which line it went wrong on.
+        tracker.push(a, ts, dt);
         if (a.voiced && f0) {
           voicedMs += dt;
           f0s.push(f0);

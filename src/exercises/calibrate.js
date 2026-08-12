@@ -1,5 +1,5 @@
 import { beginTake, smoothF0, smoothRes } from '../audio/engine.js';
-import { ANDROGYNOUS_HIGH, ANDROGYNOUS_LOW, FLOOR_MARGIN_ST, MIN_FRAMES_FOR_MEDIAN, MIN_VOICED_MS_CALIBRATE, RESONANCE_GOAL } from '../constants.js';
+import { ANDROGYNOUS_HIGH, ANDROGYNOUS_LOW, CREAK_APERIODICITY, FLOOR_MARGIN_ST, MIN_FRAMES_FOR_MEDIAN, MIN_VOICED_MS_CALIBRATE, RESONANCE_GOAL } from '../constants.js';
 import { PASSAGE, openExercise } from './registry.js';
 import { explainer, micHint } from './shared.js';
 import { base, save } from '../store/baseline.js';
@@ -102,6 +102,19 @@ export function buildCalibrate() {
         'drops sharply — so you are past the steepest part of the curve already. There is still safe ' +
         'room to lower pitch toward your target, but resonance is the larger share of the effect from ' +
         'here on.</div>');
+    } else {
+      // The assumption almost everyone arrives with is that lower is better
+      // without limit. It is not what listeners do: masculinity and
+      // naturalness are rated separately, and naturalness went *up* when pitch
+      // sat inside the ordinary male range rather than under it. That is why
+      // the target steps down by two semitones and stops at 130 Hz instead of
+      // chasing your floor. RESEARCH.md §8.
+      out.push('<div class="banner info" style="margin-top:14px">Your target is one step down — not ' +
+        'as low as your voice can go. Listeners judge how <i>natural</i> a voice sounds separately ' +
+        'from how masculine it sounds, and in transmasculine speakers naturalness was rated higher ' +
+        'when pitch sat inside the ordinary male range than when it sat below it. A voice can be ' +
+        'read as masculine and as strained at the same time, and the second one is what people ' +
+        'notice. This is why the target stops rather than chasing your floor.</div>');
     }
     return out.join('');
   }
@@ -194,11 +207,11 @@ export function buildCalibrate() {
         // Only accept clearly periodic frames. A creaky or pressed bottom note
         // has high aperiodicity, and counting it would set the floor too low —
         // which is exactly the failure this step exists to prevent.
-        if (a.voiced && f0 && a.aperiodicity < 0.2 && a.rms > 0.02) {
+        if (a.voiced && f0 && a.aperiodicity < CREAK_APERIODICITY && a.rms > 0.02) {
           if (lowest == null || f0 < lowest) lowest = f0;
         }
         setMeter('c-f0', f0 ? f0.toFixed(0) + ' Hz' : '--',
-          a.voiced ? (a.aperiodicity < 0.2 ? 'clear' : 'too creaky to count') : '');
+          a.voiced ? (a.aperiodicity < CREAK_APERIODICITY ? 'clear' : 'too creaky to count') : '');
         setMeter('c-low', lowest ? lowest.toFixed(0) + ' Hz' : '--', 'lowest clear tone');
       }
     }

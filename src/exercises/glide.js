@@ -1,4 +1,5 @@
 import { beginTake, smoothF0 } from '../audio/engine.js';
+import { CREAK_APERIODICITY } from '../constants.js';
 import { explainer, takeControls } from './shared.js';
 import { completeStep } from '../progress/state.js';
 import { base, save } from '../store/baseline.js';
@@ -83,7 +84,7 @@ export function buildGlide() {
     },
     frame: function (a) {
       var f0 = smoothF0.value();
-      var clear = a.voiced && f0 && a.aperiodicity < 0.2 && a.rms > 0.02;
+      var clear = a.voiced && f0 && a.aperiodicity < CREAK_APERIODICITY && a.rms > 0.02;
       setMeter('m-pitch', f0 ? f0.toFixed(0) + ' Hz' : '--',
         a.voiced ? (clear ? 'clear' : 'creaky — not counted') : '',
         { fill: f0 ? pitchFill(f0) : 0, hit: clear });

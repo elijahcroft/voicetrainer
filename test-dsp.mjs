@@ -277,7 +277,61 @@ console.log('\nVocal weight / spectral measures');
   check('unvoiced input returns null', DSP.spectralMeasures(new Float32Array(FRAME), 0, FS) === null);
 }
 
-// --- 6. helpers --------------------------------------------------------------
+// --- 6. voice quality (CPP) --------------------------------------------------
+
+console.log('\nCepstral peak prominence — the strain measure');
+{
+  const formants = [500, 1500, 2500, 3500];
+
+  // Deterministic noise, so a failure here is a real change and not a reroll.
+  let seed = 12345;
+  function rnd() {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return (((t ^ (t >>> 14)) >>> 0) / 4294967296) * 2 - 1;
+  }
+
+  function noisyVowel(f0, noise) {
+    let s = glottalSource(f0, FRAME, FS);
+    formants.forEach((f, i) => { s = resonate(s, f, 60 + 40 * i, FS); });
+    let peak = 0;
+    for (let i = 0; i < FRAME; i++) peak = Math.max(peak, Math.abs(s[i]));
+    const out = new Float32Array(FRAME);
+    for (let i = 0; i < FRAME; i++) out[i] = s[i] * (0.25 / peak) + noise * 0.25 * rnd();
+    return out;
+  }
+
+  // The property the whole strain warning rests on: as phonation gets noisier,
+  // the measure falls, and it never goes back up on the way.
+  const levels = [0, 0.01, 0.02, 0.05, 0.1, 0.4];
+  const vals = levels.map(nz => DSP.cpp(noisyVowel(120, nz), 120, FS));
+  check('CPP measured at every noise level', vals.every(v => v != null && isFinite(v)));
+  let monotonic = true;
+  for (let i = 1; i < vals.length; i++) if (vals[i] > vals[i - 1] + 0.01) monotonic = false;
+  check('CPP falls monotonically as noise rises', monotonic,
+    vals.map(v => v.toFixed(1)).join(' > ') + ' dB');
+  check('clean-to-noisy spans more than the 3 dB warning threshold',
+    vals[0] - vals[vals.length - 1] > 3,
+    `${(vals[0] - vals[vals.length - 1]).toFixed(1)} dB of range`);
+
+  // The confound the strain monitor has to gate against: CPP moves with pitch
+  // for reasons that have nothing to do with strain. This measures the slope
+  // so CPP_F0_GATE_HZ can be justified rather than guessed — at ~0.04 dB/Hz,
+  // the 15 Hz gate admits well under 1 dB of pitch-driven drift, against a
+  // 3 dB threshold.
+  const lowF0 = DSP.cpp(noisyVowel(90, 0), 90, FS);
+  const highF0 = DSP.cpp(noisyVowel(200, 0), 200, FS);
+  const slope = Math.abs(highF0 - lowF0) / 110;
+  check('CPP drifts with pitch at under 0.06 dB/Hz', slope < 0.06,
+    `${slope.toFixed(3)} dB/Hz — 15 Hz of drift is ${(slope * 15).toFixed(2)} dB`);
+
+  check('unvoiced input returns null', DSP.cpp(new Float32Array(FRAME), 0, FS) === null);
+  check('analyze() reports cpp on a voiced frame', DSP.analyze(noisyVowel(120, 0), FS).cpp != null);
+  check('analyze() reports no cpp on silence', DSP.analyze(new Float32Array(FRAME), FS).cpp === null);
+}
+
+// --- 7. helpers --------------------------------------------------------------
 
 console.log('\nHelpers');
 {
@@ -297,7 +351,7 @@ console.log('\nHelpers');
     Math.abs((DSP.hzToSemitones(240, 55) - DSP.hzToSemitones(120, 55)) - 12) < 1e-9);
 }
 
-// --- 7. end-to-end analyze() -------------------------------------------------
+// --- 8. end-to-end analyze() -------------------------------------------------
 
 console.log('\nanalyze() end to end');
 {

@@ -59,6 +59,17 @@
       <div>Forcing pitch downward is the main way voice practice causes injury — resonance and weight
       do more for how masculine a voice reads than pitch does, and they cost your voice nothing.</div>
     </details>
+    <!-- Raised by src/analysis/strain.js when this session's voice quality has
+         fallen measurably since it started. It never says the opposite: there
+         is no state of this banner that means "you are fine". -->
+    <div class="banner rest" id="strainNote" hidden>
+      <b>Your voice is measurably rougher than when you started.</b>
+      That is the tiring, not the practice. Stop here and come back tomorrow — this is a
+      months-long habit, and nothing is lost by ending a session early.
+      <span class="q">Read from cepstral peak prominence against your own voice at the start of
+      this session. It is a rough proxy: it can miss strain, and it cannot tell you that you are
+      fine. The Sources screen says what it rests on.</span>
+    </div>
     <div id="errBox"></div>
     <div id="pane"></div>
   </main>

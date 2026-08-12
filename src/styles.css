@@ -316,6 +316,11 @@ canvas { width: 100%; display: block; border-radius: 3px; background: var(--well
 .banner.info { background: var(--ink-3); border-color: var(--rule-2); border-left-color: var(--dim); color: var(--dim); }
 .banner.info b { color: var(--text); }
 .banner.err { background: rgba(255,84,112,.08); border-color: rgba(255,84,112,.35); border-left-color: var(--bad); color: #ffb0bf; }
+/* The rest warning. Louder than the standing safety note, because that one is
+   advice you have read a hundred times and this one is about right now. */
+.banner.rest { background: rgba(255,84,112,.1); border-color: rgba(255,84,112,.4); border-left-color: var(--bad); color: #ffc2cd; }
+.banner.rest b { display: block; color: var(--bad); font-weight: 650; }
+.banner .q { display: block; margin-top: 7px; font-size: 12px; opacity: .8; }
 
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
 .tscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
@@ -329,6 +334,33 @@ th { padding-bottom: 6px; }
 td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ok { color: var(--r-peak); } .no { color: var(--r-high); }
 .hint { font-size: 12.5px; color: var(--dim); margin-top: 10px; }
+/* A secondary control that belongs to a line of text rather than to an action
+   row — `.row` buttons go full width on a phone, which is right for starting a
+   take and much too loud for swapping a prompt. */
+button.tiny { padding: 3px 9px; font-size: 12px; vertical-align: baseline; }
+
+/* Sources. One block per drill, ruled off from the next, so a claim and the
+   work it rests on cannot drift apart while you read down the page. The kind
+   tag is set in the micro-label monospace for the same reason the meter names
+   are: it is machinery around the text, not part of it. */
+.src { border-top: 1px solid var(--rule); padding-top: 14px; margin-top: 16px; }
+.src h4 {
+  margin: 0; font-size: 15px; font-weight: 620; letter-spacing: -.01em;
+  display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
+}
+.src h4 .grade {
+  font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: .12em; color: var(--dim);
+}
+.src p { color: var(--dim); font-size: 13.5px; margin: 5px 0 9px; max-width: 68ch; }
+.src ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.65; }
+.src li { margin-bottom: 5px; }
+.src li i {
+  font-family: var(--mono); font-style: normal; font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: .1em; color: var(--dimmer);
+}
+.src a { color: var(--text); text-decoration-color: var(--rule-2); text-underline-offset: 3px; }
+.src a:hover { text-decoration-color: var(--accent); }
 
 /* Statement endings. Prompt, contour and verdict are one bordered stack on
    purpose: you read the sentence, look down two centimetres, and see what the
@@ -354,6 +386,36 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-spa
 .chip.fall { color: var(--r-peak); border-color: rgba(255,207,92,.45); }
 .chip.rise { color: var(--r-high); border-color: rgba(245,133,47,.45); }
 .chips .cnt { font-size: 12.5px; color: var(--dim); margin-left: 5px; font-family: var(--mono); }
+
+/* The annotated transcript. Read as prose first and as a report second, so the
+   words keep normal reading colour and everything the tool is saying about them
+   sits underneath or beside in the ramp. A clean line looks like nothing
+   happened, because nothing did. */
+.tx { margin-top: 16px; background: var(--well); border: 1px solid var(--rule);
+      border-radius: 4px; padding: 6px 2px; }
+.txp { padding: 9px 15px; line-height: 1.85; border-bottom: 1px solid var(--rule); }
+.txp:last-child { border-bottom: 0; }
+.txp.clean { color: var(--dim); }
+.txw { border-bottom: 1.5px solid transparent; }
+/* A filler word is a dotted underline and nothing else: it is an observation,
+   not a fault, and it must not compete with a rise three words later. */
+.txw.f { color: var(--dimmer); border-bottom: 1.5px dotted var(--dimmer); }
+.txw.e { border-bottom-color: var(--r-high); }
+.txw.e.rise { color: var(--r-high); }
+.txw.e.ask { color: var(--dim); border-bottom-color: var(--rule-2); }
+.txw.miss { color: var(--bad); text-decoration: line-through; text-decoration-color: rgba(255,84,112,.5); }
+.txq { color: var(--dimmer); font-size: 13px; font-style: italic; }
+/* Tags carry a title, so they read as annotations you can interrogate rather
+   than as buttons. */
+.txt { display: inline-flex; gap: 5px; flex-wrap: wrap; margin-left: 9px;
+       vertical-align: baseline; }
+.txt b { font-family: var(--mono); font-size: 9.5px; font-weight: 500; letter-spacing: .13em;
+         text-transform: uppercase; padding: 2px 6px; border-radius: 3px; cursor: help;
+         background: var(--ink-3); border: 1px solid var(--rule-2); color: var(--dim); }
+.txt b.rise, .txt b.stretch { color: var(--r-high); border-color: rgba(245,133,47,.45); }
+.txt b.creak, .txt b.high { color: var(--bad); border-color: rgba(255,84,112,.4); }
+.tx-switch { align-items: flex-start; cursor: pointer; }
+.tx-switch input { margin: 3px 0 0; accent-color: var(--accent); flex: none; }
 
 /* The explanation matters once, and is in the way every session after that. */
 .explain { margin: 0 0 15px; }
@@ -511,6 +573,8 @@ header { padding-top: calc(12px + env(safe-area-inset-top));
   .stack { color: var(--text); background: #f3f1ed; border-radius: 11px; }
   .verdict { background: var(--ink-3); }
   .chip { border-radius: 7px; }
+  .tx { background: #f3f1ed; border-radius: 11px; }
+  .txt b { background: #fff; }
 
   .banner { border-radius: 11px; }
   .banner.safety {
@@ -522,6 +586,8 @@ header { padding-top: calc(12px + env(safe-area-inset-top));
   }
   .banner.info { color: var(--dim); background: #f0eff8; border-color: #d8d6ef; border-left-color: #5752a3; }
   .banner.err { color: #93412f; background: #fff4f0; border-color: #edc8bd; border-left-color: #d7654c; }
+  .banner.rest { color: #8c3140; background: #fff2f4; border-color: #f0c6ce; border-left-color: #c0394f; }
+  .banner.rest b { color: #b02b45; }
   .term:hover, .term[aria-expanded="true"] { color: #5752a3; border-bottom-color: #5752a3; }
   #gloss { border-radius: 11px; box-shadow: 0 14px 34px rgba(54,49,72,.16); }
   #gloss .gt { color: #5752a3; }
@@ -684,8 +750,16 @@ header { padding-top: calc(12px + env(safe-area-inset-top));
     font: 750 8px/1.3 system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase;
   }
   .banner.safety > div { line-height: 1.45; }
+  .banner.rest {
+    color: #8c3140; background: #fff2f4; border-color: #f0c6ce; border-left-color: #c0394f;
+    border-radius: 12px; padding: 11px 13px;
+  }
+  .banner.rest b { color: #b02b45; }
   #errBox { order: 2; }
   #pane { order: 0; }
+  /* Above the exercise, not below it: a warning that you have to scroll to is
+     not a warning. */
+  #strainNote { order: -1; }
   .card {
     padding: 19px 17px; margin-bottom: 14px; background: var(--ink-2);
     border: 1px solid var(--rule); border-radius: 16px; box-shadow: 0 8px 24px rgba(54,49,72,.05);

@@ -6,6 +6,7 @@ import { buildIntonation } from './intonation.js';
 import { buildPassage } from './passage.js';
 import { buildProgress } from './progress-view.js';
 import { simpleExercise } from './shared.js';
+import { buildSources } from './sources.js';
 import { buildYawn } from './yawn.js';
 import { linkTerms } from '../glossary.js';
 import { ROUTINE, nextStep, progress, rollDay, stepDone } from '../progress/state.js';
@@ -152,6 +153,12 @@ export var EXERCISES = [
     title: 'Progress',
     sub: 'Your scored takes over time',
     build: buildProgress
+  },
+  {
+    id: 'sources',
+    title: 'Sources',
+    sub: 'What each drill rests on',
+    build: buildSources
   }
 ];
 
@@ -171,6 +178,7 @@ export function renderExList() {
     var badge = isCal ? (calibrated ? '✓' : '!')
       // A count here would read as a step number beside the numbered drills.
       : e.id === 'progress' ? '↗'
+      : e.id === 'sources' ? '§'
       // State replaces the number once there is state to show: a finished
       // step says so, but an untouched step is still just its place in the
       // routine.
@@ -243,7 +251,8 @@ function stampEyebrow(def) {
   var m = /^(\d+)\.\s*(.*)$/.exec(def.title);
   var eb = document.createElement('div');
   eb.className = 'eb';
-  eb.innerHTML = '<i>' + (m ? ('0' + m[1]).slice(-2) : def.id === 'calibrate' ? 'CAL' : 'LOG') +
+  eb.innerHTML = '<i>' + (m ? ('0' + m[1]).slice(-2)
+      : def.id === 'calibrate' ? 'CAL' : def.id === 'sources' ? 'REF' : 'LOG') +
     '</i>' + def.sub + '<s></s>';
   h.parentNode.insertBefore(eb, h);
 }

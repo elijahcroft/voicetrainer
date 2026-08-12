@@ -376,6 +376,84 @@ function largestPowerOfTwo(n) {
   return p;
 }
 
+// Cepstral peak prominence, in dB. How far the cepstral peak at the pitch
+// period rises above the cepstrum's own trend line — that is, how much of the
+// signal is a clean harmonic stack rather than noise. It is the standard
+// acoustic index of voice quality, and the only measure here that is about
+// *how the voice is working* rather than how it reads.
+//
+// Deliberately not smoothed the way Hillenbrand's CPPS is (which averages
+// across neighbouring frames and quefrencies before picking the peak). Here a
+// single frame is measured and the smoothing happens over time in the caller,
+// which is a different operation with a similar effect and a different name.
+// The absolute value is therefore not comparable to a published CPPS figure —
+// it is comparable to the same speaker, same microphone, ten minutes earlier,
+// which is the only comparison anything is allowed to make of it.
+//
+// Returns dB, or null when the frame is unusable.
+function cpp(frame, f0, sampleRate) {
+  if (!(f0 > 0)) return null;
+  var n = largestPowerOfTwo(frame.length);
+  if (n < 512) return null;
+
+  var re = new Float64Array(n), im = new Float64Array(n);
+  var start = frame.length - n;
+  for (var i = 0; i < n; i++) {
+    var w = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (n - 1)));
+    re[i] = frame[start + i] * w;
+  }
+  fft(re, im);
+
+  // Log power spectrum, mirrored so it is real and even — the DFT of which is
+  // real and even in turn, so a forward transform gives the cepstrum and no
+  // separate inverse is needed.
+  var half = n / 2;
+  var logMag = new Float64Array(n);
+  for (i = 0; i <= half; i++) {
+    var m = re[i] * re[i] + im[i] * im[i];
+    logMag[i] = 10 * Math.log10(m + 1e-20);
+  }
+  for (i = 1; i < half; i++) logMag[n - i] = logMag[i];
+
+  var cre = new Float64Array(n), cim = new Float64Array(n);
+  cre.set(logMag);
+  fft(cre, cim);
+
+  // Quefrency is measured in samples, and reads as a frequency: index q is a
+  // period of q samples, so sampleRate / q hertz. The regression spans the
+  // plausible voice range and the peak is looked for near the pitch already
+  // measured, rather than anywhere in that range — a peak at some unrelated
+  // quefrency is not evidence about *this* voice's periodicity.
+  var qLo = Math.max(2, Math.floor(sampleRate / 400));
+  var qHi = Math.min(half - 1, Math.ceil(sampleRate / 60));
+  if (qHi - qLo < 16) return null;
+
+  var ceps = new Float64Array(qHi + 1);
+  for (var q = qLo; q <= qHi; q++) ceps[q] = 20 * Math.log10(Math.abs(cre[q]) / n + 1e-12);
+
+  // Least squares over the whole range, so the baseline is the cepstrum's own
+  // trend rather than an assumed floor.
+  var count = qHi - qLo + 1, sx = 0, sy = 0;
+  for (q = qLo; q <= qHi; q++) { sx += q; sy += ceps[q]; }
+  var mx = sx / count, my = sy / count, num = 0, den = 0;
+  for (q = qLo; q <= qHi; q++) {
+    num += (q - mx) * (ceps[q] - my);
+    den += (q - mx) * (q - mx);
+  }
+  if (!(den > 0)) return null;
+  var slope = num / den, intercept = my - slope * mx;
+
+  var q0 = sampleRate / f0;
+  var pLo = Math.max(qLo, Math.floor(q0 * 0.85));
+  var pHi = Math.min(qHi, Math.ceil(q0 * 1.15));
+  if (pHi <= pLo) return null;
+  var peak = -Infinity, peakQ = pLo;
+  for (q = pLo; q <= pHi; q++) if (ceps[q] > peak) { peak = ceps[q]; peakQ = q; }
+  if (!isFinite(peak)) return null;
+
+  return peak - (slope * peakQ + intercept);
+}
+
 // Returns { h1h2, tilt, weightRaw } or null when the frame is unusable.
 //   h1h2  — dB. Higher means breathier / lighter phonation.
 //   tilt  — dB per octave, negative. Less steep means more high-frequency
@@ -520,7 +598,8 @@ function analyze(frame, sampleRate, opts) {
     envelope: null,
     weightRaw: null,
     h1h2: null,
-    tilt: null
+    tilt: null,
+    cpp: null
   };
   if (!isVoiced(pitch, opts)) return out;
   out.voiced = true;
@@ -538,6 +617,11 @@ function analyze(frame, sampleRate, opts) {
     out.h1h2 = sm.h1h2;
     out.tilt = sm.tilt;
   }
+  // Computed separately from the weight measures rather than alongside them:
+  // they share a spectrum but not their failure modes, and voice quality is
+  // the one number that should still be there on a frame where the formant or
+  // harmonic gates gave up.
+  out.cpp = cpp(frame, pitch.f0, sampleRate);
   return out;
 }
 
@@ -554,6 +638,7 @@ var api = {
   resonanceIndex: resonanceIndex,
   fft: fft,
   spectralMeasures: spectralMeasures,
+  cpp: cpp,
   MedianSmoother: MedianSmoother,
   RollingStats: RollingStats,
   hzToSemitones: hzToSemitones,
