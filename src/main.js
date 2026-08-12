@@ -38,6 +38,17 @@ renderExList();
 // The standing safety notice is where "resonance" and "weight" are first
 // used, so it gets its terms linked too. Panes link their own on open.
 linkTerms(document.querySelector('.banner.safety'));
+// The full safety note remains visible in the desktop workspace. On a phone,
+// it becomes a calm one-line reminder that can be expanded when needed, so it
+// does not compete with the lesson the user came to do.
+var phone = window.matchMedia('(max-width: 700px)');
+function sizeSafetyNotice() {
+  var notice = document.getElementById('safetyNotice');
+  if (notice) notice.open = !phone.matches;
+}
+sizeSafetyNotice();
+if (phone.addEventListener) phone.addEventListener('change', sizeSafetyNotice);
+else if (phone.addListener) phone.addListener(sizeSafetyNotice);
 // Opens where the routine left off rather than always at step one — and on
 // the log once the day is finished, which is the only thing left to look at.
 openExercise(base.habitualF0 == null ? 'calibrate' : (nextStep() || 'progress'));

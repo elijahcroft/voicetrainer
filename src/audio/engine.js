@@ -61,6 +61,7 @@ export function syncMicControls() {
   // can do, so the button says so instead of silently doing nothing.
   var mb = document.getElementById('micBtn');
   mb.disabled = audio.starting;
+  mb.dataset.shortLabel = audio.starting ? 'WAIT' : audio.running ? 'STOP' : 'MIC';
   if (audio.starting) mb.textContent = 'Waiting for permission…';
 }
 

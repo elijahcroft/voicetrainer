@@ -19,7 +19,8 @@
 <title>Voice Trainer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#08080c">
+<meta name="theme-color" content="#08080c" media="(min-width: 701px)">
+<meta name="theme-color" content="#ffffff" media="(max-width: 700px)">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="mobile-web-app-capable" content="yes">
@@ -34,13 +35,13 @@
   <div class="mic-state" id="micState" aria-live="polite"><span class="dot" id="dot"></span><span id="micLabel">microphone off</span></div>
   <div class="strip" id="streakStrip" aria-live="polite"></div>
   <div class="spacer"></div>
-  <button id="micBtn" class="primary">Start microphone</button>
+  <button id="micBtn" class="primary" data-short-label="MIC">Start microphone</button>
   <button id="resetBtn" title="Clear saved calibration and take history">Reset calibration</button>
 </header>
 
 <div class="layout">
   <nav aria-label="Practice exercises">
-    <h2>Practice</h2>
+    <h2><span class="desktop-label">Practice</span><span class="mobile-label">Today’s path</span></h2>
     <div id="exList"></div>
     <p class="locked-note" id="lockedNote" hidden>Calibrate first if you can — the targets in every drill are derived from your own voice.</p>
   </nav>
@@ -53,12 +54,11 @@
   </aside>
 
   <main>
-    <div class="banner safety compact">
-      <span aria-hidden="true">⚠</span>
-      <span><b>Stop if you feel throat tightness, pain, or hoarseness.</b> Forcing pitch downward is the
-      main way voice practice causes injury — resonance and weight do more for how masculine a voice
-      reads than pitch does, and they cost your voice nothing.</span>
-    </div>
+    <details class="banner safety compact" id="safetyNotice" open>
+      <summary><span aria-hidden="true">♥</span><b>Practice gently. Stop for tightness, pain, or hoarseness.</b></summary>
+      <div>Forcing pitch downward is the main way voice practice causes injury — resonance and weight
+      do more for how masculine a voice reads than pitch does, and they cost your voice nothing.</div>
+    </details>
     <div id="errBox"></div>
     <div id="pane"></div>
   </main>
