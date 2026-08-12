@@ -1,62 +1,36 @@
 // test-progress.mjs — the streak, daily-goal and unlock rules.
 // Run: node test-progress.mjs
 //
-// These rules live in index.html because they are wired straight into the UI,
-// so this pulls them out of that file rather than keeping a copy that could
-// drift away from what ships — the same trick test-endings.mjs uses.
+// These rules are imported from the module that ships them, so the tests and
+// the app cannot drift apart. The panes they are wired into need a browser to
+// import at all, which test-dom-stub.mjs supplies.
 //
 // The cases here are the ones this kind of code always gets wrong: the day
 // boundary (a streak must count *local* days, so practising at 23:50 and again
 // at 00:10 is two days, not one), the off-by-one in "did I miss a day", and
 // completing the same step twice for double XP.
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import './test-dom-stub.mjs';
+import {
+  DAILY_GOAL, PROGRESS_KEY, ROUTINE, XP_QUALITY, XP_STEP,
+  completeStep, dayBefore, doneToday, goalMet, nextStep, progress,
+  reloadProgress, rollDay, stepLocked, today
+} from './src/progress/state.js';
+import { base } from './src/store/baseline.js';
 
-const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'index.html'), 'utf8');
-
-function grab(name) {
-  const start = html.indexOf(`function ${name}(`);
-  if (start < 0) throw new Error('not found: ' + name);
-  let depth = 0;
-  for (let j = html.indexOf('{', start); j < html.length; j++) {
-    if (html[j] === '{') depth++;
-    else if (html[j] === '}' && --depth === 0) return html.slice(start, j + 1);
-  }
-  throw new Error('unbalanced: ' + name);
-}
-const consts = [...html.matchAll(/^  var (ROUTINE|DAILY_GOAL|XP_STEP|XP_QUALITY) = [^;]+;/gm)]
-  .map(m => m[0]).join('\n');
-
-// The extracted functions read `progress` and `base`, and completeStep calls
-// into the DOM at the end. Both are supplied by the harness: the point is to
-// test the rules, not the rendering.
-const src = [
-  consts,
-  'var progress, base;',
-  'function saveProgress() {}',
-  'function renderStreak() {}',
-  'function renderExList() {}',
-  'function celebrate() {}',
-  'function showSummary() {}',
-  grab('today'),
-  grab('dayBefore'),
-  grab('rollDay'),
-  grab('doneToday'),
-  grab('goalMet'),
-  grab('stepDone'),
-  grab('stepLocked'),
-  grab('nextStep'),
-  grab('completeStep')
-].join('\n\n');
-
-const api = new Function(src +
-  '\nreturn { today, dayBefore, rollDay, doneToday, goalMet, stepDone, stepLocked,' +
-  '         nextStep, completeStep, ROUTINE, DAILY_GOAL, XP_STEP, XP_QUALITY,' +
-  '         set: function (p, b) { progress = p; base = b; },' +
-  '         get: function () { return progress; } };')();
-
-const { ROUTINE, DAILY_GOAL, XP_STEP, XP_QUALITY } = api;
+// State is seeded through the real load path — written to the fake
+// localStorage and read back by resetProgress — rather than assigned past it,
+// so loadProgress is on trial too. `base` is a plain object the app mutates in
+// place, so the harness does the same.
+const api = {
+  today, dayBefore, rollDay, doneToday, goalMet, nextStep, completeStep, stepLocked,
+  set(p, b) {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(p));
+    reloadProgress();
+    Object.keys(base).forEach(function (k) { delete base[k]; });
+    Object.assign(base, b || {});
+  },
+  get() { return progress; }
+};
 
 let pass = 0, fail = 0;
 function ok(name, cond, extra = '') {
@@ -77,7 +51,9 @@ function fresh(over = {}) {
   };
   Object.assign(p, over);
   api.set(p, CALIBRATED);
-  return p;
+  // The module owns the object once it has been loaded, so hand back the one
+  // the rules will actually mutate rather than the seed that produced it.
+  return api.get();
 }
 
 // --- day arithmetic --------------------------------------------------------
@@ -191,32 +167,23 @@ ok('today is a local YYYY-MM-DD', /^\d{4}-\d{2}-\d{2}$/.test(api.today()));
   eq('the best is a high-water mark, not the current streak', p.best, 12);
 }
 
-// --- unlocking -------------------------------------------------------------
+// --- the path --------------------------------------------------------------
 
 {
   api.set({ xp: 0, streak: 0, best: 0, lastGoalDay: null, day: api.today(), done: {}, ever: [], muted: false }, {});
-  ok('everything is locked before calibration', api.stepLocked('straw'));
-  eq('...and there is no next step', api.nextStep(), null);
+  ok('nothing is locked before calibration', !api.stepLocked('straw'));
+  eq('...though the path has no next step yet', api.nextStep(), null);
 }
 {
   fresh({ ever: [] });
-  ok('the first step is open on a fresh calibrated account', !api.stepLocked('straw'));
-  ok('...but the second is not', api.stepLocked('yawn'));
+  ok('every step is open on a fresh account', !api.stepLocked('free'));
   eq('...and the path points at the first', api.nextStep(), 'straw');
 }
 {
   const p = fresh({ ever: ['straw'] });
-  ok('finishing a step once unlocks the next', !api.stepLocked('yawn'));
-  ok('...and does not unlock the one after that', api.stepLocked('ng'));
   // Done today, so the path should move on rather than point at it again.
   p.done = { straw: 20 };
   eq('the path skips what is already done today', api.nextStep(), 'yawn');
-}
-{
-  // An unlock is for good: a step done last week stays open today even though
-  // today's list is empty.
-  fresh({ ever: ROUTINE.slice(), done: {} });
-  ok('a lifetime unlock survives the day rolling over', !api.stepLocked('free'));
 }
 {
   const p = fresh({ ever: ROUTINE.slice() });

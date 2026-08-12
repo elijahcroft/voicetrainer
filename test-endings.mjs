@@ -1,34 +1,16 @@
 // test-endings.mjs — the statement-endings measurement, against synthetic
 // sentences of known shape.  Run: node test-endings.mjs
 //
-// The measurement lives in index.html because it is bound up with the
-// exercise UI, so this pulls the four functions it needs out of that file
-// rather than keeping a copy that could drift away from what ships.  The
+// The measurement is imported from src/analysis/, which is where it lives now
+// that it is no longer tangled up with the exercise UI.  The
 // synthetic sentences are the cases the first version of this drill got wrong:
 // a rise that starts *below* the body of the sentence, and an ending that never
 // stops being voiced.
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { HOLD_LONG_MS, PHRASE_GAP_MS, TERMINAL_ST } from './src/constants.js';
+import { SMOOTH_HALF_MS, medianFilter } from './src/analysis/smooth.js';
+import { contourDelta, findFinalSyllable } from './src/analysis/endings.js';
 
-const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'index.html'), 'utf8');
-
-function grab(name, kind = 'function') {
-  const start = html.indexOf(`${kind} ${name}(`);
-  if (start < 0) throw new Error('not found: ' + name);
-  let i = html.indexOf('{', start), depth = 0;
-  for (let j = i; j < html.length; j++) {
-    if (html[j] === '{') depth++;
-    else if (html[j] === '}' && --depth === 0) return html.slice(start, j + 1);
-  }
-  throw new Error('unbalanced: ' + name);
-}
-const consts = [...html.matchAll(/^  var (PHRASE_GAP_MS|MIN_PHRASE_MS|FINAL_SCAN_MS|SYLLABLE_DIP|CONTOUR_MIN_MS|TERMINAL_ST|HOLD_LONG_MS|SMOOTH_HALF_MS) = [^;]+;/gm)]
-  .map(m => m[0]).join('\n');
-const src = [consts, grab('median'), grab('medianFilter'), grab('findFinalSyllable'), grab('contourDelta')].join('\n\n');
-const { findFinalSyllable, contourDelta, medianFilter, SMOOTH_HALF_MS, C } = new Function(src +
-  '\nreturn { findFinalSyllable, contourDelta, medianFilter, SMOOTH_HALF_MS,' +
-  '         C: { HOLD_LONG_MS, TERMINAL_ST, PHRASE_GAP_MS } };')();
+const C = { HOLD_LONG_MS, TERMINAL_ST, PHRASE_GAP_MS };
 
 const FRAME = 16.7;
 const hzToSemitones = hz => 12 * Math.log2(hz / 55);

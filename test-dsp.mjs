@@ -4,10 +4,10 @@
  *
  * Run: node test-dsp.mjs
  */
-import DSP from './dsp.js';
+import DSP from './src/dsp.js';
 
 const FS = 48000;
-const FRAME = 4096; // matches AnalyserNode.fftSize in index.html
+const FRAME = 4096; // matches AnalyserNode.fftSize in src/audio/engine.js
 
 let passed = 0;
 let failed = 0;

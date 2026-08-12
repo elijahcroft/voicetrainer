@@ -1,0 +1,515 @@
+/* ------------------------------------------------------------------------
+   Look: a spectrogram.
+
+   The field is the near-black floor of an analysis window, every surface is
+   flat and matte, and the only colour in the entire interface is the energy
+   ramp a spectrogram uses — magenta where there is little, amber where it
+   peaks. That ramp is not decoration: it is the state. Off your target reads
+   magenta, on target reads amber, and it means the same thing on the live
+   trace, the meter bars, the ending chips and the progress dots. Everything
+   else is graphite, so the one thing that carries colour is your voice.
+
+   Labels are monospaced small-caps because this is an instrument, and the
+   numbers are the point; headings are the only place with any weight to them.
+   ------------------------------------------------------------------------ */
+:root {
+  --ink: #08080c;          /* the field */
+  --ink-2: #101016;        /* panels */
+  --ink-3: #16161d;        /* raised: meters, buttons, chips */
+  --well: #050508;         /* sunk: traces, passages — below the floor */
+  --rule: #23232e;
+  --rule-2: #33333f;
+  --text: #eceaf2;
+  --dim: #8b8898;
+  --dimmer: #625f6e;
+
+  /* The ramp, low energy to peak. Used in this order and nowhere else. */
+  --r-low: #7a1f6b;
+  --r-mid: #d43b7a;        /* signal, live, off-target */
+  --r-high: #f5852f;       /* nearly there / caution */
+  --r-peak: #ffcf5c;       /* in band */
+
+  /* Semantic names the markup and the diagrams already use, mapped onto it. */
+  --accent: var(--r-mid);
+  --good: var(--r-peak);
+  --warn: var(--r-high);
+  --bad: #ff5470;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--ink); color: var(--text);
+  font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Every micro-label in the interface — eyebrows, meter names, column heads —
+   is the same monospaced small-caps. One rule, so they stay one voice. */
+.eb, nav h2, aside.numbers h2, .meter .lab, th, .stack .prompt .cnt {
+  font-family: var(--mono); font-size: 10.5px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: .16em; color: var(--dim);
+}
+
+button {
+  font: inherit; color: var(--text); background: var(--ink-3);
+  border: 1px solid var(--rule-2); border-radius: 4px;
+  padding: 9px 16px; cursor: pointer;
+  transition: border-color .12s, background .12s, color .12s;
+}
+button:hover:not(:disabled) { border-color: var(--dim); background: #1c1c25; }
+button:disabled { opacity: .35; cursor: not-allowed; }
+/* Bone white, not a ramp colour: the ramp belongs to your voice, and a button
+   is not your voice. */
+button.primary { background: var(--text); color: var(--ink); border-color: var(--text); font-weight: 600; }
+button.primary:hover:not(:disabled) { background: #fff; border-color: #fff; }
+button.recording {
+  background: rgba(212,59,122,.12); border-color: var(--r-mid); color: #ffc2dd; font-weight: 600;
+}
+:focus-visible { outline: 2px solid var(--r-peak); outline-offset: 2px; border-radius: 4px; }
+
+header {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 12px 20px; border-bottom: 1px solid var(--rule);
+  background: var(--ink); position: sticky; top: 0; z-index: 20;
+}
+header h1 {
+  font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .28em;
+  text-transform: uppercase; font-family: var(--mono);
+}
+.mic-state {
+  font-size: 11px; font-family: var(--mono); text-transform: uppercase; letter-spacing: .1em;
+  color: var(--dim); display: flex; align-items: center; gap: 7px;
+  background: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 5px 10px;
+}
+.mic-state.live { border-color: rgba(255,207,92,.4); color: var(--r-peak); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dimmer); flex-shrink: 0; }
+.dot.on { background: var(--r-peak); box-shadow: 0 0 0 0 rgba(255,207,92,.55); animation: pulse 2s ease-out infinite; }
+@keyframes pulse {
+  70% { box-shadow: 0 0 0 7px rgba(255,207,92,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,207,92,0); }
+}
+.spacer { flex: 1; }
+
+/* The routine strip: streak, today's goal, XP. Set as instrument readouts
+   rather than as badges — same monospace, same graphite, and it only takes
+   colour when there is something true to say. The streak mark is a triangle,
+   not a flame: this interface has one colour vocabulary and a cartoon fire
+   would be the only thing in it that is not measuring something. */
+.strip {
+  display: flex; align-items: center; gap: 12px;
+  font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
+  color: var(--dim); background: var(--ink-2);
+  border: 1px solid var(--rule); border-radius: 3px; padding: 4px 8px 4px 10px;
+}
+.strip .sg { display: flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+.strip .sg b { font-size: 9px; color: var(--dimmer); }
+.strip .sg.live { color: var(--r-peak); }
+.strip .sg.live b { color: var(--r-peak); }
+.strip .gdots { display: flex; align-items: center; gap: 4px; }
+.strip .gd {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: transparent; border: 1px solid var(--rule-2);
+}
+.strip .gd.on { background: var(--r-mid); border-color: var(--r-mid); }
+.strip .gdots.met .gd.on { background: var(--r-peak); border-color: var(--r-peak); }
+.strip .gdots em { font-style: normal; margin-left: 3px; font-variant-numeric: tabular-nums; }
+.strip .gdots.met em { color: var(--r-peak); }
+.strip .xp { color: var(--dimmer); font-variant-numeric: tabular-nums; }
+.strip .mute {
+  padding: 0 2px; background: none; border: none; font-size: 12px;
+  line-height: 1; opacity: .55; border-radius: 3px;
+}
+.strip .mute:hover { opacity: 1; background: none; border: none; }
+
+/* The XP number leaves the step that earned it. */
+.xpfly {
+  position: fixed; z-index: 60; pointer-events: none; transform: translate(-50%, -50%);
+  font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--r-peak);
+  text-shadow: 0 0 12px rgba(255,207,92,.5);
+  animation: xpfly 1.1s cubic-bezier(.2,.7,.3,1) forwards;
+}
+@keyframes xpfly {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(.85); }
+  18%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -190%) scale(1); }
+}
+/* End-of-day summary. Same card, same rules — it is a readout of the day,
+   not a trophy screen, so nothing in it is bigger or brighter than the
+   numbers it is reporting. */
+.sum-back {
+  position: fixed; inset: 0; z-index: 50; background: rgba(5,5,8,.72);
+  display: grid; place-items: center; padding: 20px;
+  overflow-y: auto; animation: fade .18s ease-out;
+}
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+.sum {
+  width: min(440px, 100%); margin: auto; max-height: 100%; overflow-y: auto;
+  box-shadow: 0 18px 60px rgba(0,0,0,.6);
+}
+.sum-stats { display: flex; gap: 22px; margin: 14px 0 4px; }
+.sum-stats div { display: flex; flex-direction: column; gap: 2px; }
+.sum-stats b {
+  font-family: var(--mono); font-size: 23px; font-weight: 600; color: var(--r-peak);
+  font-variant-numeric: tabular-nums; line-height: 1.1;
+}
+.sum-stats span {
+  font-family: var(--mono); font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: .13em; color: var(--dim);
+}
+.sum-steps { list-style: none; margin: 18px 0 0; padding: 0; }
+.sum-steps li {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding: 7px 0; border-bottom: 1px solid var(--rule); font-size: 13.5px;
+}
+.sum-steps li::before { content: '✓'; color: var(--r-peak); font-size: 11px; margin-right: -6px; }
+.sum-steps li span { flex: 1; }
+.sum-steps em {
+  font-style: normal; font-family: var(--mono); font-size: 11px;
+  color: var(--dim); font-variant-numeric: tabular-nums;
+}
+.sum-cmp { margin-top: 18px; }
+.sum-cmp .d-up { color: var(--r-peak); }
+.sum-cmp .d-down { color: var(--r-mid); }
+.sum-cmp .d-flat { color: var(--dim); }
+
+.spark {
+  position: fixed; z-index: 60; pointer-events: none;
+  width: 5px; height: 5px; border-radius: 50%; margin: -2.5px 0 0 -2.5px;
+  animation: spark .9s cubic-bezier(.15,.8,.3,1) forwards;
+}
+@keyframes spark {
+  0%   { opacity: 1; transform: translate(0, 0) scale(1); }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(.3); }
+}
+
+/* Grid rather than flex so the numbers panel can sit beside the exercise on
+   a wide screen and below it on a phone, where a table above the exercise
+   would push the thing you came to use off the bottom of the fold. */
+.layout {
+  display: grid; gap: 22px; padding: 22px 20px 48px;
+  grid-template-columns: 250px minmax(0, 1fr);
+  grid-template-areas: "nav main" "numbers main";
+  align-items: start; align-content: start;
+  max-width: 1240px; margin: 0 auto;
+}
+nav { grid-area: nav; }
+aside.numbers { grid-area: numbers; }
+main { grid-area: main; }
+nav h2, aside.numbers h2 { margin: 0 0 9px 1px; }
+
+/* The practice list is a sequence — a routine you work down — so the numbers
+   are real information and are set as an instrument would set them: 01, 02,
+   monospaced, in their own column. Calibration and the log are not steps in
+   that sequence and get a glyph instead of a number. */
+.ex {
+  display: flex; align-items: flex-start; gap: 11px; width: 100%; text-align: left; margin-bottom: 3px;
+  background: transparent; border: 1px solid transparent; border-radius: 4px;
+  padding: 9px 11px; position: relative; transition: background .12s, border-color .12s;
+}
+.ex:hover:not(:disabled) { background: var(--ink-2); border-color: var(--rule); }
+.ex.active { background: var(--ink-2); border-color: var(--rule-2); }
+.ex.active::before {
+  content: ''; position: absolute; left: -1px; top: -1px; bottom: -1px;
+  width: 2px; background: var(--r-mid);
+}
+.ex .n {
+  flex-shrink: 0; width: 20px; margin-top: 1px; text-align: center;
+  font-family: var(--mono); font-size: 11px; color: var(--dimmer);
+  font-variant-numeric: tabular-nums; letter-spacing: .02em;
+}
+.ex.active .n { color: var(--r-mid); }
+.ex.done .n { color: var(--r-peak); }
+.ex .t { font-weight: 550; font-size: 13.5px; letter-spacing: -.005em; }
+.ex .s { font-size: 12px; color: var(--dim); margin-top: 1px; line-height: 1.4; }
+
+/* Path states. A finished step recedes rather than lighting up — you are
+   looking for what is left, and the loudest thing in the list should be the
+   one you have not done. */
+.ex.done .t, .ex.done .s { color: var(--dim); }
+.ex.done .t { font-weight: 500; }
+.ex .xpb {
+  margin-left: auto; align-self: center; font-family: var(--mono);
+  font-size: 10px; color: var(--r-peak); opacity: .75; font-variant-numeric: tabular-nums;
+}
+.ex.next .n { color: var(--r-peak); }
+.ex.next .t { color: var(--text); }
+.locked-note { font-size: 11.5px; color: var(--dim); margin: 8px 0 0 1px; }
+
+main { flex: 1; min-width: 0; }
+.card {
+  background: var(--ink-2); border: 1px solid var(--rule); border-radius: 5px;
+  padding: 22px; margin-bottom: 14px;
+}
+/* The eyebrow carries the step number and the exercise name; the h3 below it
+   says what you are about to do. Together they replace a title that had to
+   do both jobs at once. */
+.eb {
+  display: flex; align-items: center; gap: 10px;
+  margin: -2px 0 10px; padding-bottom: 10px; border-bottom: 1px solid var(--rule);
+}
+.eb i { font-style: normal; color: var(--text); }
+.eb s { flex: 1; height: 1px; background: var(--rule); text-decoration: none; }
+.card h3 { margin: 0 0 6px; font-size: 20px; font-weight: 620; letter-spacing: -.02em; }
+.why { color: var(--dim); font-size: 13.5px; margin: 0 0 15px; max-width: 68ch; }
+.steps { margin: 0 0 4px; padding-left: 21px; max-width: 62ch; }
+.steps li { margin-bottom: 7px; }
+.steps li::marker { color: var(--dimmer); font-family: var(--mono); font-size: 12px; }
+/* Diagnosis and caveats read as steps when they sit inside the list, so they
+   live below it instead — you can follow the numbers with your mouth busy. */
+.note { font-size: 13px; color: var(--dim); margin: 13px 0 0; max-width: 66ch; }
+.note b { color: var(--text); font-weight: 600; }
+
+.diagram {
+  margin: 16px 0 0; padding: 15px 16px 12px;
+  background: var(--well); border: 1px solid var(--rule); border-radius: 4px;
+}
+.diagram .dwrap { margin: 0 auto; }
+.diagram svg { display: block; width: 100%; height: auto; overflow: visible; }
+/* The rule spans the whole figure; the text inside it stops at a readable
+   measure, which is why the caption is a block wrapping an inner span. */
+.diagram figcaption {
+  font-size: 12.5px; color: var(--dim); line-height: 1.5;
+  margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--rule);
+}
+.diagram figcaption span { display: block; max-width: 70ch; }
+
+canvas { width: 100%; display: block; border-radius: 3px; background: var(--well); }
+
+.meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 16px; }
+.meter {
+  background: var(--ink-3); border: 1px solid var(--rule); border-radius: 4px;
+  padding: 11px 13px 13px; transition: border-color .15s;
+}
+.meter .val {
+  font-family: var(--mono); font-size: 26px; font-weight: 500; margin: 5px 0 2px;
+  font-variant-numeric: tabular-nums; line-height: 1.1; letter-spacing: -.02em;
+}
+.meter .sub { font-size: 12px; color: var(--dim); min-height: 17px; }
+.meter.muted { opacity: .35; }
+.meter.hit { border-color: rgba(255,207,92,.45); }
+.meter.hit .val { color: var(--r-peak); }
+.meter.idle .val { color: var(--dimmer); }
+
+/* The bar is a scale, not a progress bar: ticks along the track, the reading
+   as a lit segment on it, the target as a notch you are trying to reach. */
+.bar {
+  height: 7px; background: var(--well); border-radius: 2px; margin-top: 10px;
+  position: relative; overflow: hidden;
+  background-image: repeating-linear-gradient(90deg, var(--rule) 0 1px, transparent 1px 25%);
+}
+.bar > i {
+  display: block; height: 100%; width: 0; border-radius: 2px;
+  background: linear-gradient(90deg, var(--r-low), var(--r-mid));
+  transition: width .09s linear, background .15s;
+}
+.meter.hit .bar > i { background: linear-gradient(90deg, var(--r-high), var(--r-peak)); }
+.bar > u { position: absolute; top: -1px; bottom: -1px; width: 1px; background: var(--text); opacity: .55; }
+
+.banner {
+  padding: 12px 15px; border-radius: 4px; font-size: 13.5px; margin-bottom: 16px;
+  border: 1px solid; border-left-width: 2px;
+}
+.banner.compact { padding: 10px 14px; font-size: 12.5px; display: flex; gap: 10px; align-items: flex-start; }
+.banner.compact b { font-weight: 650; }
+/* display:flex above would otherwise beat the UA rule for [hidden]. */
+.banner[hidden] { display: none; }
+.banner.safety { background: rgba(245,133,47,.07); border-color: rgba(245,133,47,.3); border-left-color: var(--r-high); color: #f6c79b; }
+.banner.info { background: var(--ink-3); border-color: var(--rule-2); border-left-color: var(--dim); color: var(--dim); }
+.banner.info b { color: var(--text); }
+.banner.err { background: rgba(255,84,112,.08); border-color: rgba(255,84,112,.35); border-left-color: var(--bad); color: #ffb0bf; }
+
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+.tscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+.passage {
+  background: var(--well); border-radius: 4px; padding: 16px 18px;
+  font-size: 16.5px; line-height: 1.8; border: 1px solid var(--rule);
+}
+table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 6px; }
+td, th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); }
+th { padding-bottom: 6px; }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ok { color: var(--r-peak); } .no { color: var(--r-high); }
+.hint { font-size: 12.5px; color: var(--dim); margin-top: 10px; }
+
+/* Statement endings. Prompt, contour and verdict are one bordered stack on
+   purpose: you read the sentence, look down two centimetres, and see what the
+   ending did. Spreading them across separate cards put the feedback far
+   enough from the prompt that you had to hunt for it. */
+.stack { border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; background: var(--well); }
+.stack .prompt { padding: 14px 17px 15px; border-bottom: 1px solid var(--rule); }
+.stack .prompt .say { font-size: 20px; line-height: 1.45; margin-top: 5px; }
+.stack canvas { display: block; width: 100%; height: 188px; border-radius: 0; }
+/* A trace that is not inside a stack still needs its own edge, now that it
+   shares a card with the text above it. */
+.trace { display: block; width: 100%; height: 200px; background: var(--well);
+         border: 1px solid var(--rule); border-radius: 4px; }
+.verdict { display: flex; gap: 11px; align-items: baseline; flex-wrap: wrap;
+           padding: 12px 17px; background: var(--ink-3); border-top: 1px solid var(--rule); }
+.verdict .v { font-family: var(--mono); font-size: 17px; font-weight: 500; color: var(--dim); }
+.verdict .d { font-size: 12.5px; color: var(--dim); }
+.verdict.good .v { color: var(--r-peak); }
+.verdict.warn .v { color: var(--r-high); }
+.chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 13px; align-items: center; }
+.chip { width: 26px; height: 26px; border-radius: 3px; display: grid; place-items: center;
+        font-size: 13px; background: var(--ink-3); border: 1px solid var(--rule); color: var(--dimmer); }
+.chip.fall { color: var(--r-peak); border-color: rgba(255,207,92,.45); }
+.chip.rise { color: var(--r-high); border-color: rgba(245,133,47,.45); }
+.chips .cnt { font-size: 12.5px; color: var(--dim); margin-left: 5px; font-family: var(--mono); }
+
+/* The explanation matters once, and is in the way every session after that. */
+.explain { margin: 0 0 15px; }
+.explain > summary { cursor: pointer; color: var(--dim); font-size: 13px; list-style: none;
+                     display: inline-flex; gap: 7px; align-items: center; }
+.explain > summary::-webkit-details-marker { display: none; }
+.explain > summary::before { content: "+"; font-family: var(--mono); font-size: 13px; }
+.explain[open] > summary::before { content: "–"; }
+.explain > summary:hover { color: var(--text); }
+.explain > div { padding-top: 13px; }
+code { font-family: var(--mono); background: var(--ink-3); padding: 1px 5px; border-radius: 3px; font-size: .92em; }
+
+/* ---- Glossary ---------------------------------------------------------
+   Anatomy words are load-bearing here — "lower the larynx" is an instruction
+   you cannot follow if you do not know what a larynx is or what moving one
+   feels like. Rather than dilute the copy, the terms carry a dotted underline
+   and open a definition where they sit. */
+/* A button, so it is reachable by keyboard — but the UA stylesheet resets
+   case and tracking on buttons, and a term sitting inside a small-caps meter
+   label has to keep wearing that label's clothes. */
+.term {
+  font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0;
+  letter-spacing: inherit; text-transform: inherit; text-align: inherit;
+  border-bottom: 1px dashed var(--dimmer); cursor: help; border-radius: 0;
+}
+.term:hover, .term[aria-expanded="true"] { color: var(--r-peak); border-bottom-color: var(--r-peak); }
+#gloss {
+  position: absolute; z-index: 60; width: min(310px, calc(100vw - 24px));
+  background: var(--ink-3); border: 1px solid var(--rule-2); border-radius: 5px;
+  padding: 13px 15px 14px; box-shadow: 0 14px 34px rgba(0,0,0,.6);
+}
+#gloss[hidden] { display: none; }
+#gloss .gt {
+  font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: .16em; color: var(--r-peak); margin-bottom: 7px;
+}
+#gloss .gd { font-size: 13.5px; line-height: 1.55; }
+/* What it feels like from the inside, which is the part a dictionary leaves
+   out and the part you actually practise with. */
+#gloss .gf {
+  font-size: 13px; line-height: 1.5; color: var(--dim);
+  margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--rule);
+}
+#gloss .gf b { color: var(--text); font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before { animation: none !important; transition: none !important; }
+}
+
+/* Installed on a phone the page owns the whole screen, notch and home bar
+   included, so keep the sticky header and the last row clear of both. */
+header { padding-top: calc(12px + env(safe-area-inset-top));
+         padding-left: calc(20px + env(safe-area-inset-left));
+         padding-right: calc(20px + env(safe-area-inset-right)); }
+.layout { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
+
+@media (max-width: 860px) {
+  .layout {
+    padding: 14px 12px 40px; gap: 16px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "nav" "main" "numbers";
+  }
+  /* align-items:flex-start, or every card in the strip stretches to the
+     height of the tallest one and the row becomes a wall of empty boxes. */
+  #exList {
+    display: flex; align-items: flex-start; gap: 7px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity; overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    /* Bleed to the screen edges so the strip reads as scrollable. */
+    margin: 0 -12px; padding: 1px 12px 3px;
+  }
+  #exList::-webkit-scrollbar { display: none; }
+  #exList .ex {
+    width: auto; min-width: 166px; max-width: 78vw; flex-shrink: 0;
+    margin-bottom: 0; scroll-snap-align: start;
+    background: var(--ink-2); border-color: var(--rule);
+  }
+  #exList .ex.active { border-color: var(--rule-2); }
+}
+
+/* Phone. Last in the sheet on purpose — these are overrides of the rules
+   above, and a media query carries no extra weight in the cascade.
+   Two wrapped rows of header controls ate a third of the fold, and the mic
+   pill's label only repeats what the button beside it says, so on a narrow
+   screen the pill shrinks to its status dot and the bar stays one line. */
+@media (max-width: 700px) {
+  header { gap: 9px;
+           padding: calc(9px + env(safe-area-inset-top)) calc(13px + env(safe-area-inset-right))
+                    9px calc(13px + env(safe-area-inset-left)); }
+  header h1 { font-size: 13px; letter-spacing: .24em; }
+  .mic-state { padding: 7px; gap: 0; }
+  .mic-state #micLabel { display: none; }
+  /* The full title plus both controls is ~15px too wide for a 375px phone,
+     and wrapping costs a whole row of sticky header. The app's own short
+     name is "Voice", so that is what a phone shows. */
+  .wordmark { display: none; }
+  /* 44px is the smallest square a thumb hits reliably. Glossary terms are
+     excluded: they are words inside a sentence, not controls. */
+  button:not(.term) { min-height: 44px; padding: 10px 15px; }
+  /* Reset is rare and destructive: reachable, but not competing for width
+     with the control pressed at the start of every session. */
+  #resetBtn { width: 44px; padding: 0; font-size: 0; flex-shrink: 0; }
+  #resetBtn::before { content: '↺'; font-size: 19px; line-height: 1; }
+
+  /* On a phone the strip is not in the header at all — placeStrip() moves it
+     above the practice list, because in the header it forced a second sticky
+     row and cost 35px off the top of every screen, which is the exact thing
+     the rules above exist to prevent. Out of the bar it can afford to be
+     fuller than the desktop version rather than thinner. */
+  .strip {
+    width: 100%; justify-content: flex-start; gap: 14px;
+    padding: 8px 11px; margin-bottom: 10px;
+  }
+  .strip .xp { margin-left: auto; }
+  .strip .mute { min-height: 0; }
+
+  .card { padding: 16px 14px; margin-bottom: 12px; }
+  .card h3 { font-size: 18px; }
+  .why, .note { font-size: 13px; }
+  .steps { padding-left: 19px; }
+  .passage { padding: 14px 15px; font-size: 16px; }
+  .stack .prompt { padding: 13px 15px 14px; }
+  .stack .prompt .say { font-size: 18px; }
+  .stack canvas { height: 152px; }
+  .trace { height: 168px; }
+  .diagram { padding: 13px 12px 10px; }
+  /* Fixed two columns rather than auto-fit: the meters are read out of the
+     corner of your eye while you speak, so a legible number beats fitting
+     one more box on the line. */
+  .meters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .meter { padding: 10px 11px 12px; }
+  .meter .val { font-size: 22px; }
+  table { font-size: 13px; }
+  td, th { padding: 7px 8px; }
+  /* Six columns of takes cannot fit 390px. Bleed the scroller to the card's
+     edges so the row that is cut off is visibly cut off, not just clipped. */
+  .tscroll { margin-left: -14px; margin-right: -14px; padding: 0 14px; }
+  .tscroll table { min-width: 460px; }
+  /* Buttons in an action row span the width and stack. Sizing them by class
+     instead would move them under the thumb mid-take, since a running take
+     swaps .primary for .recording. */
+  .row { gap: 8px; }
+  .row > button { flex: 1 1 100%; }
+  /* An exercise card is taller than a phone screen, so the control that
+     starts and stops the take would sit off the bottom while you are
+     watching the trace. Sticky rather than fixed: it rides at the bottom of
+     the screen for as long as its own card is on it, and nowhere else. */
+  .row.take {
+    position: sticky; bottom: calc(6px + env(safe-area-inset-bottom)); z-index: 15;
+    margin: 16px -14px -6px; padding: 9px 14px 6px;
+    background: var(--ink-2); border-top: 1px solid var(--rule);
+  }
+  .row.take #status { flex: 1 1 100%; }
+  /* The metric picker is a set of equal choices, not an action row. */
+  #metricRow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
