@@ -44,8 +44,23 @@ var PROGRAMS = [
     ]
   },
   {
+    id: 'onset',
+    name: '2. Easy-onset reset',
+    claim: 'That establishing continuous airflow before adding voice can reduce breath-holding ' +
+           'and make phonation easier; the checklist itself is intentionally unscored.',
+    grade: 'Moderate for flow phonation, Weak for this exact three-step reset',
+    refs: [
+      ['clinical', 'ASHA Voice Disorders practice portal — stretch-and-flow and flow phonation',
+        'https://www.asha.org/practice-portal/clinical-topics/voice-disorders/'],
+      ['clinical', 'UCSF: transgender voice and communication — flow phonation and vocal efficiency',
+        'https://transcare.ucsf.edu/guidelines/vocal-health']
+    ],
+    note: 'The microphone cannot score the silent-airflow phase, so completion records practice ' +
+          'rather than pretending an acoustic measure can verify the technique.'
+  },
+  {
     id: 'yawn',
-    name: '2. Yawn-sigh',
+    name: '3. Yawn-sigh',
     claim: 'That larynx height can be trained independently of pitch, and that lowering it ' +
            'lengthens the vocal tract enough to change how the voice reads.',
     grade: 'Strong for the mechanism, Moderate for the exercise',
@@ -62,7 +77,7 @@ var PROGRAMS = [
   },
   {
     id: 'ng',
-    name: '3. "Ng" slides',
+    name: '4. "Ng" slides',
     claim: 'That pitch and resonance should descend together, and that a slide on /ŋ/ is where ' +
            'you can feel whether they do.',
     grade: 'Weak — practitioner convention',
@@ -74,8 +89,24 @@ var PROGRAMS = [
     ]
   },
   {
+    id: 'ladder',
+    name: '5. Resonance ladder',
+    claim: 'That resonance practice should progress from a basic sound through syllables and ' +
+           'words into phrases instead of jumping directly from an isolated sound to conversation.',
+    grade: 'Moderate for hierarchical transfer, Weak for these prompts and timing',
+    refs: [
+      ['clinical', 'ASHA Voice Disorders practice portal — resonant voice therapy continuum',
+        'https://www.asha.org/practice-portal/clinical-topics/voice-disorders/'],
+      ['journal', 'Outcomes of gender-affirming voice and communication modification training ' +
+        'for non-binary individuals — sound-to-conversation resonance hierarchy',
+        'https://pmc.ncbi.nlm.nih.gov/articles/PMC10909913/']
+    ],
+    note: 'Vowel content changes the resonance estimate. The meter therefore guides each rung, ' +
+          'but time practised—not a resonance threshold—unlocks the next rung.'
+  },
+  {
     id: 'vowels',
-    name: '4. Sustained vowels',
+    name: '6. Sustained vowels',
     claim: 'That holding the target on an open vowel builds the habit of starting speech there — ' +
            'and that a thin, pressed low note is a failure rather than a success.',
     grade: 'Weak for the drill, Moderate for the strain it guards against',
@@ -88,7 +119,7 @@ var PROGRAMS = [
   },
   {
     id: 'glide',
-    name: '5. Pitch glides',
+    name: '7. Pitch glides',
     claim: 'That the safe floor is a measurement that moves with technique, so it is worth ' +
            're-taking rather than assuming.',
     grade: 'Weak — the 3-semitone margin is a deliberately conservative judgement call',
@@ -101,7 +132,7 @@ var PROGRAMS = [
   },
   {
     id: 'endings',
-    name: '6. Statement endings',
+    name: '8. Statement endings',
     claim: 'That intonation carries a gendered reading independently of mean pitch, so terminal ' +
            'rise and final-syllable stretch are worth training on their own.',
     grade: 'Moderate for the effect, Weak for the thresholds',
@@ -118,7 +149,7 @@ var PROGRAMS = [
   },
   {
     id: 'passage',
-    name: '7. Reading passage',
+    name: '9. Reading passage',
     claim: 'That connected speech on a fixed text is the comparable measurement — the same reason ' +
            'the research uses standard passages.',
     grade: 'Strong as method',
@@ -133,7 +164,7 @@ var PROGRAMS = [
   },
   {
     id: 'free',
-    name: '8. Free speech',
+    name: '10. Free speech',
     claim: 'That trained habits have to survive spontaneous speech to count, and that practising ' +
            'real situations is how they get there.',
     grade: 'Moderate — carryover practice is standard clinical procedure',
@@ -143,6 +174,24 @@ var PROGRAMS = [
       ['journal', 'Gender-affirming voice therapy duration and satisfaction (J Voice, 2025)',
         'https://pubmed.ncbi.nlm.nih.gov/39765446/']
     ]
+  },
+  {
+    id: 'focus',
+    name: 'Today’s focus',
+    claim: 'That several completed days can choose a useful practice emphasis without moving ' +
+           'your calibrated targets or letting one noisy take steer the session.',
+    grade: 'Weak for the thresholds, Moderate for dosage and carryover',
+    refs: [
+      ['clinical', 'ASHA practice portal: gender-affirming voice and communication — home ' +
+        'practice and generalization',
+        'https://www.asha.org/practice-portal/professional-issues/gender-affirming-voice-and-communication/'],
+      ['journal', 'Developing and testing a smartphone application to enhance adherence to voice ' +
+        'therapy: a pilot study',
+        'https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9914943/']
+    ],
+    note: 'The two-day minimum and the four trigger gaps are conservative design choices, not ' +
+          'published perceptual or clinical boundaries. The coach collapses retries to one median ' +
+          'per day, reads only completed days, and never changes a target.'
   },
   {
     id: 'strain',

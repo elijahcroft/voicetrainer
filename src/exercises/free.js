@@ -1,7 +1,7 @@
 import { beginTake, smoothF0 } from '../audio/engine.js';
 import { PhraseTracker } from '../analysis/phrases.js';
 import { Recognizer, transcription } from '../analysis/transcribe.js';
-import { MIN_FRAMES_FOR_MEDIAN, MIN_VOICED_MS_SCORE } from '../constants.js';
+import { MIN_FRAMES_FOR_MEDIAN, MIN_VOICED_MS_FREE } from '../constants.js';
 import { mountTranscriptToggle, renderTranscriptInto, takeControls,
          transcriptToggle } from './shared.js';
 import { completeStep } from '../progress/state.js';
@@ -40,6 +40,9 @@ export function buildFree() {
       '<p class="why">Live meters are useful for drilling and actively harmful for conversation — ' +
       'watching a number pulls you out of speaking. Talk for a minute, with nothing to look at, ' +
       'and read the result afterwards.</p>' +
+      '<div class="practice-cue"><b>Do this</b><span>Speak continuously for about one minute. ' +
+        'Develop the situation with several sentences; the app needs at least 30 seconds of actual ' +
+        'voiced speech before it will score the take.</span></div>' +
       '<div class="passage" id="scenario" style="font-size:15.5px">' + SCENARIOS[scenario] + '</div>' +
       '<div class="hint">A situation to talk your way through, if you want one — the point is that ' +
       'the voice has to hold up somewhere real, not just in a drill. Talk about anything you like ' +
@@ -51,7 +54,7 @@ export function buildFree() {
       '<div id="transcript"></div>' +
     '</div>';
 
-  var running = false, f0s = [], resList = [], weights = [], t0 = null;
+  var running = false, f0s = [], resList = [], weights = [];
   var voicedMs = 0, lastTs = null;
   var tracker = new PhraseTracker(), rec = null;
 
@@ -60,7 +63,7 @@ export function buildFree() {
     el.textContent = on ? 'Stop and score' : 'Start talking';
     el.className = on ? 'recording' : 'primary';
     if (on) {
-      f0s = []; resList = []; weights = []; t0 = null;
+      f0s = []; resList = []; weights = [];
       voicedMs = 0; lastTs = null;
       tracker.reset();
       rec = new Recognizer();
@@ -104,7 +107,6 @@ export function buildFree() {
       var f0 = smoothF0.value();
       var dt = lastTs == null ? 0 : Math.min(100, ts - lastTs);
       lastTs = ts;
-      if (t0 == null) t0 = ts;
       tracker.push(a, ts, dt);
       if (a.voiced && f0) {
         voicedMs += dt;
@@ -117,16 +119,18 @@ export function buildFree() {
       // first frame took to arrive, and this is the only elapsed number the
       // drill shows you.
       document.getElementById('status').textContent =
-        ((ts - t0) / 1000).toFixed(0) + ' s — no meters on purpose' +
+        (voicedMs / 1000).toFixed(0) + ' of ' + (MIN_VOICED_MS_FREE / 1000) +
+        ' s voiced — no meters on purpose' +
         (transcription.enabled ? ' · transcribing' : '');
     }
   };
 
   function report() {
-    if (voicedMs < MIN_VOICED_MS_SCORE) {
+    if (voicedMs < MIN_VOICED_MS_FREE) {
       document.getElementById('report').innerHTML =
         '<div class="banner err" style="margin-top:14px">Only ' + (voicedMs / 1000).toFixed(1) +
-        ' s of voiced speech — too little to score. Talk for a bit longer.</div>';
+        ' s of voiced speech — ' + (MIN_VOICED_MS_FREE / 1000) +
+        ' s are needed. Keep developing the situation.</div>';
       return;
     }
     var mF0 = median(f0s), sd = semitoneSd(f0s);

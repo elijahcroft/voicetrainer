@@ -28,11 +28,19 @@ export function explainer(cfg) {
     (cfg.summary || 'How to do it, and why it works') + '</summary><div>' + body + '</div></details>';
 }
 
+// The action belongs above the controls, not behind the optional explanation.
+// A returning user should be able to open a drill and immediately see how many
+// repetitions to do, how long each one lasts, and when to rest.
+export function practiceCue(text) {
+  return '<div class="practice-cue"><b>Do this</b><span>' + text + '</span></div>';
+}
+
 export function simpleExercise(cfg) {
   var html =
     '<div class="card">' +
       '<h3>' + cfg.title + '</h3>' +
       '<p class="why">' + cfg.why + '</p>' +
+      practiceCue(cfg.practice) +
       explainer(cfg) +
       '<canvas id="rib" class="trace" style="height:210px" role="img" aria-label="Live pitch trace"></canvas>' +
       '<div class="meters">' +
@@ -164,7 +172,8 @@ export function takeControls(label, extra) {
     '<button id="go" class="primary" data-needs-mic>' + label + '</button>' +
     (extra || '') +
     '<span id="status" style="color:var(--dim);font-size:13px"></span>' +
-    '</div>' + micHint();
+    '</div><p class="stop-rule">Keep the sound easy. Stop this exercise if you feel pain, ' +
+    'tightness, burning, or increasing effort.</p>' + micHint();
 }
 export function micHint() {
   // "Nothing is uploaded" was unqualified until transcription existed. It is

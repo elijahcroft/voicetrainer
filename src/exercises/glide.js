@@ -1,6 +1,6 @@
 import { beginTake, smoothF0 } from '../audio/engine.js';
 import { CREAK_APERIODICITY } from '../constants.js';
-import { explainer, takeControls } from './shared.js';
+import { explainer, practiceCue, takeControls } from './shared.js';
 import { completeStep } from '../progress/state.js';
 import { base, save } from '../store/baseline.js';
 import { DIAGRAMS } from '../ui/diagrams.js';
@@ -14,28 +14,59 @@ export function buildGlide() {
       '<h3>Pitch glides — re-measure your floor</h3>' +
       '<p class="why">Your comfortable range moves as technique improves. Re-measuring keeps the ' +
       'pitch target honest instead of letting it drift away from what your voice can actually hold.</p>' +
+      practiceCue('Record 4 separate downward “ahh” glides. Each one starts comfortably, lasts ' +
+        'about 3–5 seconds, and ends as soon as the tone becomes creaky, breathy, or effortful.') +
       explainer({
         steps: [
           'Sigh down on "ahh" from a comfortable pitch.',
           'Stop the moment the tone turns creaky or effortful.',
-          'Repeat three or four times, then save the result as your new floor.'
+          'Fully release between glides. After four clear glides, save their middle result as your new floor.'
         ],
         note: 'Creaky frames are discarded, so pushing past the clear part of the glide ' +
               'does not lower your floor — it just adds nothing.',
         diagram: DIAGRAMS.glide
       }) +
       '<canvas id="rib" class="trace" role="img" aria-label="Live pitch trace"></canvas>' +
-      '<div class="meters">' + meter('m-pitch', 'Pitch', '', true) + meter('m-low', 'Lowest clear') +
-        meter('m-cur', 'Current floor') + '</div>' +
+      '<div class="meters">' + meter('m-pitch', 'Pitch', '', true) + meter('m-low', 'New floor estimate') +
+        meter('m-reps', 'Clear glides') + meter('m-cur', 'Current floor') + '</div>' +
       takeControls('Start', '<button id="saveFloor" disabled>Save as new floor</button>') +
     '</div>';
 
-  var rib, running = false, lowest = null;
+  var REQUIRED_GLIDES = 4;
+  var MIN_GLIDE_MS = 700;
+  var END_GAP_MS = 250;
+  var rib, running = false, lowest = null, minima = [];
+  var glideMin = null, glideMs = 0, gapMs = 0, lastTs = null;
+
+  function floorEstimate() { return floorFromGlides(minima, REQUIRED_GLIDES); }
+
+  function partialEstimate() {
+    if (!minima.length) return null;
+    var sorted = minima.slice().sort(function (a, b) { return a - b; });
+    var mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  function finishGlide() {
+    if (glideMin != null && glideMs >= MIN_GLIDE_MS && minima.length < REQUIRED_GLIDES) {
+      minima.push(glideMin);
+    }
+    glideMin = null; glideMs = 0; gapMs = 0;
+    lowest = floorEstimate();
+    var partial = partialEstimate();
+    setMeter('m-reps', minima.length + ' of ' + REQUIRED_GLIDES,
+      minima.length >= REQUIRED_GLIDES ? 'enough to save' : 'release, then glide again',
+      { hit: minima.length >= REQUIRED_GLIDES });
+    setMeter('m-low', (lowest != null ? lowest : partial) != null ?
+      (lowest != null ? lowest : partial).toFixed(0) + ' Hz' : '--',
+      lowest != null ? 'median of four clear glide bottoms' : 'provisional — collect all four');
+    document.getElementById('saveFloor').disabled = minima.length < REQUIRED_GLIDES;
+  }
 
   function setRunning(el, on) {
     running = on;
     if (on) {
-      lowest = null; rib.pts = [];
+      lowest = null; minima = []; glideMin = null; glideMs = 0; gapMs = 0; lastTs = null; rib.pts = [];
       beginTake();
       // All three of these outlived the take that produced them: the meter
       // kept showing the previous take's floor until a clear frame replaced
@@ -43,9 +74,11 @@ export function buildGlide() {
       // pressing it did nothing at all, and "Floor updated" sat there through
       // the next take as though it had just happened.
       setMeter('m-low', '--');
+      setMeter('m-reps', '0 of ' + REQUIRED_GLIDES, 'start the first glide');
       document.getElementById('saveFloor').disabled = true;
       document.getElementById('status').textContent = 'recording — nothing is saved';
     } else {
+      finishGlide();
       document.getElementById('status').textContent = '';
     }
     el.textContent = on ? 'Stop' : 'Start';
@@ -82,21 +115,36 @@ export function buildGlide() {
         completeStep('glide', 1);
       };
     },
-    frame: function (a) {
+    frame: function (a, ts) {
       var f0 = smoothF0.value();
       var clear = a.voiced && f0 && a.aperiodicity < CREAK_APERIODICITY && a.rms > 0.02;
       setMeter('m-pitch', f0 ? f0.toFixed(0) + ' Hz' : '--',
         a.voiced ? (clear ? 'clear' : 'creaky — not counted') : '',
         { fill: f0 ? pitchFill(f0) : 0, hit: clear });
       if (running) {
+        var dt = lastTs == null ? 0 : Math.min(100, ts - lastTs);
+        lastTs = ts;
         rib.push(a.voiced ? f0 : 0);
-        if (clear && (lowest == null || f0 < lowest)) {
-          lowest = f0;
-          document.getElementById('saveFloor').disabled = false;
+        if (clear) {
+          gapMs = 0;
+          glideMs += dt;
+          if (glideMin == null || f0 < glideMin) glideMin = f0;
+        } else if (glideMin != null) {
+          gapMs += dt;
+          if (gapMs >= END_GAP_MS) finishGlide();
         }
-        setMeter('m-low', lowest ? lowest.toFixed(0) + ' Hz' : '--');
         rib.draw(null);
       }
     }
   };
+}
+
+// Kept pure so the safety-critical aggregation rule can be tested without a
+// microphone. No floor exists until the promised number of glides exists.
+export function floorFromGlides(values, required) {
+  required = required || 4;
+  if (!values || values.length < required) return null;
+  var sorted = values.slice().sort(function (a, b) { return a - b; });
+  var mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }

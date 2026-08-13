@@ -45,14 +45,14 @@ var GLOSSARY = [
     def: 'How large the space above your folds sounds. Shown in centimetres because the number ' +
          'estimates the length of your vocal tract: a longer tube reads as a bigger, lower voice ' +
          'at any pitch.',
-    feel: 'Bigger is the direction you want. This is the measure that does the most for how ' +
-          'masculine a voice reads, and unlike pitch it costs your voice nothing.' },
+    feel: 'A larger sound can be trained without lowering pitch. Explore it with an easy throat; ' +
+          'the meter is feedback, not a reason to push the larynx down.' },
 
   { name: 'vocal weight', re: /\bvocal weight\b|\bweight\b/i,
     def: 'How much of each vocal fold takes part in the vibration. Heavier means thicker contact ' +
          'and a fuller sound; lighter means the thin edges only.',
-    feel: 'Heavy is the rumble you can feel in your sternum. Thin and pressed can hit the same ' +
-          'note but leaves you tired — telling those two apart is the whole job of this meter.' },
+    feel: 'A fuller sound may feel more substantial in the mouth or chest. The meter estimates a ' +
+          'change from your baseline, but only you can feel whether the sound is easy or pressed.' },
 
   { name: 'pressing', re: /\bpressing\b|\bpressed\b/i,
     def: 'Forcing a note out by squeezing the folds together harder, instead of letting air do ' +

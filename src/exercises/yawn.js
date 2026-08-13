@@ -1,6 +1,6 @@
 import { beginTake, smoothRes } from '../audio/engine.js';
 import { RAMP, RESONANCE_GOAL } from '../constants.js';
-import { explainer, pctVsBaseline, resonanceMeterOpts, resonanceSub, takeControls } from './shared.js';
+import { explainer, pctVsBaseline, practiceCue, resonanceMeterOpts, resonanceSub, takeControls } from './shared.js';
 import { completeStep } from '../progress/state.js';
 import { base } from '../store/baseline.js';
 import { DIAGRAMS } from '../ui/diagrams.js';
@@ -12,14 +12,18 @@ export function buildYawn() {
     '<div class="card">' +
       '<h3>Yawn-sigh — lowering the larynx</h3>' +
       '<p class="why">A larger resonating space is the single biggest non-pitch cue to a masculine ' +
-      'voice, and unlike pitch it costs your voice nothing. Beginning a yawn drops the larynx; the ' +
-      'sigh keeps it there while you make sound.</p>' +
+      'voice. Beginning a yawn drops the larynx; the sigh lets you explore that larger space ' +
+      'without asking your pitch to go lower.</p>' +
+      practiceCue('Do 6–8 short sighs. Let each “ahh” last 4–6 seconds, then fully release and ' +
+        'take one easy breath.') +
       explainer({
         steps: [
-          'Begin a yawn, and feel the voice box drop in your neck.',
-          'Before the yawn finishes, sigh out an easy open "ahh".',
+          'Begin the feeling of a small, silent yawn; do not stretch to the largest yawn you can make.',
+          'Before it finishes, sigh out an easy open “ahh”. Keep the jaw and throat loose.',
           'Let the pitch land wherever it wants — only resonance is scored here.'
         ],
+        note: 'Do not push or hold the larynx down. A larger resonance number only counts when ' +
+              'the sigh still feels easy.',
         diagram: DIAGRAMS.larynx,
         extra: '<div class="banner info" style="margin:14px 0 0">' +
           'The pitch readout is hidden on purpose. Larynx height and pitch tend to move together, ' +
@@ -40,7 +44,7 @@ export function buildYawn() {
   // Sighs are short and come in sets, so the goal is accumulated voiced time
   // across the take rather than one long hold — a minute of yawn-sighs is
   // eight or ten of them, not one.
-  var GOAL_S = 60;
+  var GOAL_S = 35;
   var cv, g, hist = [], running = false, best = null, voicedMs = 0, lastTs = null, scored = false;
 
   function draw() {

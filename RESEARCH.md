@@ -52,6 +52,9 @@ and that is invisible in a bare URL.
 | `CPP_DROP_DB` | 3 dB | `src/constants.js` | Session decline that raises the rest warning | §11 — Weak (judgement call) |
 | `CPP_F0_GATE_HZ` | 15 Hz | `src/constants.js` | Pitch difference above which the strain comparison refuses to answer | §11 — Verified here |
 | `CPP_HOLD_MS` | 5 s | `src/constants.js` | How long a decline must persist before it is called one | §11 — Verified here |
+| `MIN_FOCUS_DAYS` | 2 days | `src/progress/focus.js` | A single practice day cannot specialize the next session | §9 — Weak (conservative design choice) |
+| `MAX_FOCUS_DAYS` | 5 days | `src/progress/focus.js` | Keeps coaching responsive without letting one take dominate | §9 — Weak (design choice) |
+| Coaching gaps | pitch 6%; resonance 4%; intonation 15%; carryover 6% | `src/progress/focus.js` | Minimum gap before the daily plan specializes | §9 — Weak (measurement guards, not perceptual cut-points) |
 | LPC order | 20 | `src/dsp.js` | Textbook order 14 cannot cover 0–6 kHz here | §7 — Verified here |
 | Formant-gate tolerance | see `estimateVTL()` | `src/dsp.js` | Rejects frames where a formant is missing or spurious | §7 — Verified here |
 
@@ -219,25 +222,41 @@ This is why `pitchTarget()` derives from a measured floor plus a 3-semitone marg
 | # | Exercise | Rationale |
 |---|---|---|
 | 1 | Straw phonation | Semi-occluded vocal tract balances pressure across the folds, reducing collision force. Standard low-strain warm-up. |
-| 2 | Yawn-sigh | Beginning a yawn lowers the larynx; the sigh keeps it there while phonating. Directly trains the resonance dimension. |
-| 3 | "Ng" slides | /ŋ/ makes larynx height easy to feel, and descending on it couples pitch and resonance the way a naturally low voice does. |
-| 4 | Sustained vowels | Builds muscle memory to *start* speech at the target rather than drifting up. |
-| 5 | Glides | Re-measures the floor, which moves as technique improves. |
-| 6 | Statement endings | Terminal rise and final-syllable lengthening are heard independently of pitch, and cost nothing to change. |
-| 7–8 | Passage + free speech | Connected speech is the real test; spontaneous speech is where trained habits either hold or don't. |
+| 2 | Easy-onset reset | Establishes continuous airflow before voice is added, then carries that easy start into a phrase. |
+| 3 | Yawn-sigh | Beginning a yawn lowers the larynx; the sigh explores that larger space without requiring lower pitch. |
+| 4 | "Ng" slides | /ŋ/ makes larynx height easy to feel, and descending on it couples pitch and resonance. |
+| 5 | Resonance ladder | Bridges isolated resonance into syllables, words, and a conversational phrase. |
+| 6 | Sustained vowels | Builds muscle memory to *start* speech at the target rather than drifting up. |
+| 7 | Glides | Re-measures the floor from the median of four clear glide bottoms. |
+| 8 | Statement endings | Trains terminal shape separately from mean pitch over one eight-sentence round. |
+| 9–10 | Passage + free speech | Connected speech is the real test; spontaneous speech is where trained habits either hold or don't. |
 
 The order is a ramp: least strain first, most transfer to real speech last.
 
 ```
   warm up          isolate the skill        combine        transfer
   ───────          ─────────────────        ───────        ────────
-  1 straw    ──►   2 yawn-sigh (resonance)  ──►  4 vowels  ──►  7 passage
-                   5 glides   (pitch floor)      3 "ng"         8 free speech
-                        │                        6 endings           │
+  1 straw    ──►   2 easy onset              ──►  5 ladder  ──►  9 passage
+                   3 yawn-sigh (resonance)       6 vowels      10 free speech
+                   7 glides   (pitch floor)       4 "ng"             │
+                        │                         8 endings            │
                         └── feeds the floor back into the target ────┘
 ```
 
-### Intonation, and what exercise 6 actually measures
+**Easy onset and the ladder are coordination and transfer steps.** Flow phonation establishes
+steady outward airflow before voice is added; the reset uses a tissue or the hand because the
+browser cannot score silent airflow. Resonant voice therapy is normally hierarchical, moving from
+basic speech gestures through words and phrases into conversation. The ladder makes that missing
+middle explicit. Its rungs unlock on voiced practice time rather than a resonance threshold because
+different vowels naturally produce different formant estimates.
+
+- `[clinical]` ASHA Voice Disorders practice portal — flow phonation and resonant voice therapy —
+  <https://www.asha.org/practice-portal/clinical-topics/voice-disorders/>
+- `[journal]` Outcomes of gender-affirming voice and communication modification training for
+  non-binary individuals — resonance work from single words through conversation —
+  <https://pmc.ncbi.nlm.nih.gov/articles/PMC10909913/>
+
+### Intonation, and what exercise 8 actually measures
 
 > **Evidence: Moderate** that intonation contributes to gendered voice perception independently of
 > mean pitch. **Weak** for the specific thresholds — `TERMINAL_ST` and `HOLD_LONG_MS` are judgement
@@ -470,6 +489,21 @@ charted.
 versus paper. This is the entire justification for the streak layer existing, and it is worth
 being honest that it supports *the approach*, not this implementation of it.
 
+**Adaptive daily focus.** The five-step recommendation is a scheduling layer, not a new acoustic
+measure. It always begins with straw phonation, always ends with the fixed passage and free speech,
+and uses the two middle slots for the largest reliable gap: pitch, resonance, intonation, or the
+reading-to-conversation carryover gap. Every drill remains open and the coach never changes a
+calibrated target.
+
+One take is not evidence enough to steer tomorrow. Takes are first collapsed to one median per
+calendar day, at least two completed passage days are required, and only the five most recent days
+are considered. Today's takes are excluded so the plan cannot change halfway through the session.
+The trigger gaps are deliberately quiet engineering guards rather than published perceptual
+boundaries: 6% over the pitch target (the same tolerance the passage already uses), 4% under the
+resonance goal (inside the strict estimator's roughly 5% error), 15% over calibrated intonation
+spread, and a matched free-speech pitch more than 6% above the same day's passage. These thresholds
+have **Weak** evidence: they limit noisy recommendations; they do not identify clinical deficits.
+
 **The testosterone timeline, for those on T.** F0 drops substantially in the first months, with
 most of the change typically inside the first six to nine months and a long tail of refinement
 after. The variation between individuals is the important part: some people see almost nothing in
@@ -505,19 +539,22 @@ this tool uses it*, on the scale defined at the top of this file.
 |---|---|---|---|
 | Calibration | A useful target comes from your own habitual pitch and your own measured floor, not a population average | Moderate | §1, §2, §4 |
 | 1. Straw warm-up | A semi-occluded tract lets you work low with less collision force | Moderate | §5 |
-| 2. Yawn-sigh | Larynx height trains independently of pitch, and lengthening the tract changes how the voice reads | Strong (mechanism) / Moderate (exercise) | §3, §5 |
-| 3. "Ng" slides | Pitch and resonance should descend together | Weak — practitioner convention | §5 |
-| 4. Sustained vowels | Holding the target builds the habit of starting speech there; a pressed low note is a failure | Weak (drill) / Moderate (the strain it guards against) | §4, §5 |
-| 5. Pitch glides | The safe floor moves with technique, so it is re-measured rather than assumed | Weak — the 3-semitone margin is a conservative judgement call | §4 |
-| 6. Statement endings | Intonation reads as gendered independently of mean pitch | Moderate (effect) / Weak (thresholds) | §5 |
-| 7. Reading passage | A fixed text is the comparable measurement | Strong as method | §6, §7 |
-| 8. Free speech | Habits must survive spontaneous speech, and situations are rehearsed rather than waited for | Moderate | §9 |
+| 2. Easy-onset reset | Continuous airflow before voice can reduce breath-holding and facilitate easier phonation | Moderate (method) / Weak (this checklist) | §5 |
+| 3. Yawn-sigh | Larynx height trains independently of pitch, and lengthening the tract changes how the voice reads | Strong (mechanism) / Moderate (exercise) | §3, §5 |
+| 4. "Ng" slides | Pitch and resonance should descend together | Weak — practitioner convention | §5 |
+| 5. Resonance ladder | Resonant voice work progresses from basic gestures through words, phrases, and conversation | Moderate (hierarchy) / Weak (prompts and timing) | §5 |
+| 6. Sustained vowels | Holding the target builds the habit of starting speech there; comfort outranks the weight estimate | Weak (drill) / Moderate (the strain it guards against) | §4, §5 |
+| 7. Pitch glides | The safe floor moves with technique, so it is re-measured rather than assumed | Weak — the 3-semitone margin is a conservative judgement call | §4 |
+| 8. Statement endings | Intonation reads as gendered independently of mean pitch | Moderate (effect) / Weak (thresholds) | §5 |
+| 9. Reading passage | A fixed text is the comparable measurement | Strong as method | §6, §7 |
+| 10. Free speech | Habits must survive spontaneous speech, and situations are rehearsed rather than waited for | Moderate | §9 |
+| Today's focus | Several completed days can choose a useful emphasis without moving the user's targets | Weak for the thresholds / Moderate for dosage and carryover | §9 |
 | The two warnings | Creak is distinguishable from a note, and a session-long decline in voice quality is visible in the signal | Moderate (measures) / Weak (thresholds) | §11 |
 | The live meters | Real-time resonance biofeedback helps at all | Moderate — usability and single-session results, with trans women rather than transmasculine users | §6 |
 
 Two things this table cannot do. It cannot tell you that a drill is safe for *your* voice today —
 no acoustic measure here sees strain directly (§8). And it cannot make a Weak row stronger by
-being written down: three of the eight drills rest on practitioner convention, and the honest
+being written down: several of the ten drills rest partly on practitioner convention, and the honest
 statement is that a different clinician would order them differently.
 
 ---

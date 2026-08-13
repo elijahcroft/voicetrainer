@@ -56,6 +56,7 @@ export var CPP_HOLD_MS = 5000;       // the decline must persist this long befor
 // always meant.
 export var MIN_VOICED_MS_CALIBRATE = 5000;
 export var MIN_VOICED_MS_SCORE = 2000;
+export var MIN_VOICED_MS_FREE = 30000; // carryover needs sustained speech, not one short phrase
 export var MIN_FRAMES_FOR_MEDIAN = 20;   // frames, correctly: enough samples to median
 
 export var STORE_KEY = 'voice-trainer-baseline-v1';

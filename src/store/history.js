@@ -1,5 +1,4 @@
 import { HISTORY_KEY, MAX_TAKES } from '../constants.js';
-import { renderExList } from '../exercises/registry.js';
 
 // ==========================================================================
 // saved takes
@@ -32,11 +31,9 @@ export function recordTake(kind, m) {
   });
   if (history.length > MAX_TAKES) history = history.slice(-MAX_TAKES);
   try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch (e) {}
-  renderExList();
 }
 
 export function clearHistory() {
   history = [];
   try { localStorage.removeItem(HISTORY_KEY); } catch (e) {}
-  renderExList();
 }

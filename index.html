@@ -42,6 +42,7 @@
 <div class="layout">
   <nav aria-label="Practice exercises">
     <h2><span class="desktop-label">Practice plan</span><span class="mobile-label">Practice plan</span></h2>
+    <section class="focus-card" id="focusCard" aria-live="polite" hidden></section>
     <div id="exList"></div>
     <p class="locked-note" id="lockedNote" hidden>Calibrate first if you can — the targets in every drill are derived from your own voice.</p>
   </nav>
@@ -57,7 +58,8 @@
     <details class="banner safety compact" id="safetyNotice" open>
       <summary><span aria-hidden="true">Care</span><b>Practice gently. Stop for tightness, pain, or hoarseness.</b></summary>
       <div>Forcing pitch downward is the main way voice practice causes injury — resonance and weight
-      do more for how masculine a voice reads than pitch does, and they cost your voice nothing.</div>
+      do more for how masculine a voice reads than pitch does, and neither requires chasing a lower
+      note. They still need to feel easy; never force a larger or heavier sound.</div>
     </details>
     <!-- Raised by src/analysis/strain.js when this session's voice quality has
          fallen measurably since it started. It never says the opposite: there

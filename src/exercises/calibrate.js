@@ -30,7 +30,8 @@ export function buildCalibrate() {
     if (stage === 0) {
       el.innerHTML =
         '<div class="banner info">Step 1 of 2 — habitual voice</div>' +
-        '<p>Read this aloud in your completely normal, everyday voice. Do not try to change it; ' +
+        '<p><b>Read the entire passage once</b> in your completely normal, everyday voice, then ' +
+        'press Stop. Do not try to change it; ' +
         'this measurement is the reference everything else is compared against.</p>' +
         '<div class="passage">' + PASSAGE + '</div>' +
         '<div class="meters">' + meter('c-f0', 'Pitch') + meter('c-res', 'Resonance') +
@@ -41,9 +42,10 @@ export function buildCalibrate() {
     } else if (stage === 1) {
       el.innerHTML =
         '<div class="banner info">Step 2 of 2 — comfortable floor</div>' +
-        '<p>Sigh downward on "ahh" from a comfortable pitch, and stop the moment the sound turns ' +
+        '<p><b>Make three or four separate downward “ahh” glides.</b> Release and breathe between ' +
+        'them. Start each at a comfortable pitch, and stop the moment the sound turns ' +
         'creaky, breathy, or effortful. <b>Do not push for your lowest possible note</b> — the point ' +
-        'is the lowest note that still sounds clear and takes no effort. Do it three or four times.</p>' +
+        'is the lowest note that still sounds clear and takes no effort.</p>' +
         explainer({ summary: 'What counts as the bottom of your range', diagram: DIAGRAMS.glide }) +
         '<div class="meters">' + meter('c-f0', 'Pitch') + meter('c-low', 'Lowest clear') + '</div>' +
         '<div class="row take"><button id="calGo" class="primary" data-needs-mic>Start glides</button>' +

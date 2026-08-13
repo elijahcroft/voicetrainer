@@ -21,6 +21,9 @@ export function buildPassage() {
       '<p class="why">Connected speech is the real test. Resonance is only meaningful when averaged ' +
       'over many vowels, so this take is compared against your calibration reading of the same ' +
       'passage — like for like.</p>' +
+      '<div class="practice-cue"><b>Do this</b><span>Read the entire passage once in your practised ' +
+        'voice. Continue through small mistakes, then press <i>Stop and score</i> only after the ' +
+        'final word.</span></div>' +
       // The text you are reading and the trace of you reading it belong to
       // each other, so they share one bordered block rather than two cards.
       '<div class="stack">' +

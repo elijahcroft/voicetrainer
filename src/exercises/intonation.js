@@ -3,7 +3,7 @@ import { contourDelta, findFinalSyllable } from '../analysis/endings.js';
 import { beginTake } from '../audio/engine.js';
 import { CONTOUR_MIN_MS, HOLD_LONG_MS, MIN_PHRASE_MS, PHRASE_GAP_MS, TERMINAL_ST } from '../constants.js';
 import { STATEMENTS } from './registry.js';
-import { takeControls } from './shared.js';
+import { practiceCue, takeControls } from './shared.js';
 import { completeStep } from '../progress/state.js';
 import { SMOOTH_HALF_MS, medianFilter } from '../analysis/smooth.js';
 import { Contour } from '../ui/contour.js';
@@ -16,15 +16,17 @@ export function buildIntonation() {
       '<h3>Statement endings — landing the last syllable</h3>' +
       '<p class="why">Two habits sit on top of pitch and are heard independently of it: holding the ' +
       'final syllable long, and letting it slide upward. Neither needs your range to move, and ' +
-      'neither costs your voice anything to change. <b>Read the sentence below, then pause for about ' +
+      'both should remain easy. <b>Read the sentence below, then pause for about ' +
       'a second</b> — the pause is what tells the tool an ending happened.</p>' +
+      practiceCue('Read all 8 sentences once. After each sentence, stay silent for about one ' +
+        'second so the app can score the ending and show the next prompt.') +
 
       '<details class="explain"><summary>How to do it, and what is being measured</summary><div>' +
         '<ol class="steps">' +
           '<li>Read the sentence, then <b>pause for about a second</b> — the pause is what tells ' +
             'the tool the sentence ended.</li>' +
           '<li>Keep the last syllable <i>short</i>, and let the pitch drop onto it.</li>' +
-          '<li>Aim for eight in a row with no rise.</li>' +
+          '<li>Complete all eight prompts. Falling is the target, flat is also acceptable, and a rise is feedback to retry later.</li>' +
         '</ol>' +
         '<p class="note">Falling is the target and flat is fine; only a rise counts against you. ' +
         'Do not fake the fall by shoving the pitch down at the end — drop it and stop, the way you ' +
@@ -205,10 +207,10 @@ export function buildIntonation() {
 
   function report() {
     var el = document.getElementById('report');
-    if (results.length < 3) {
+    if (results.length < STATEMENTS.length) {
       el.innerHTML = '<div class="banner err" style="margin-top:14px">Only ' + results.length +
-        ' sentence' + (results.length === 1 ? '' : 's') + ' scored. Read several, leaving about a ' +
-        'second of silence between them.</div>';
+        ' of ' + STATEMENTS.length + ' sentences scored. Continue until every prompt has a result, ' +
+        'leaving about a second of silence between them.</div>';
       return;
     }
     var rises = results.filter(function (r) { return r.dir === 'rise'; }).length;
@@ -232,9 +234,8 @@ export function buildIntonation() {
       'only means anything against the sentences on this page. The transfer test is whether the ' +
       'endings still land in <b>Free speech</b>, where nothing is prompting you.</div>';
 
-    // Three scored sentences is the least that says anything, and it is the
-    // same bar the report itself uses to agree to print. Graded on how many
-    // landed rather than rose.
+    // The visible exercise promises one complete eight-sentence round, so the
+    // completion rule uses that same boundary. Graded on how many landed.
     completeStep('endings', 1 - rises / results.length);
   }
 }

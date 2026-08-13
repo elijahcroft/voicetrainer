@@ -7,7 +7,7 @@ import './styles.css';
 
 import { audio, startMic, stopMic } from './audio/engine.js';
 import { linkTerms } from './glossary.js';
-import { openExercise, renderExList } from './exercises/registry.js';
+import { dailyFocus, openExercise, renderExList } from './exercises/registry.js';
 import { progress, nextStep, resetProgress } from './progress/state.js';
 import { placeStrip, renderStreak } from './progress/strip.js';
 import { base, save, resetBaseline } from './store/baseline.js';
@@ -51,7 +51,7 @@ if (phone.addEventListener) phone.addEventListener('change', sizeSafetyNotice);
 else if (phone.addListener) phone.addListener(sizeSafetyNotice);
 // Opens where the routine left off rather than always at step one — and on
 // the log once the day is finished, which is the only thing left to look at.
-openExercise(base.habitualF0 == null ? 'calibrate' : (nextStep() || 'progress'));
+openExercise(base.habitualF0 == null ? 'calibrate' : (nextStep(dailyFocus().steps) || 'progress'));
 
 // Installable + offline. Vite emits a hashed bundle, so the service worker is
 // registered from the built page only; in dev it would cache the dev server's

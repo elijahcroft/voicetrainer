@@ -183,7 +183,17 @@ ok('today is a local YYYY-MM-DD', /^\d{4}-\d{2}-\d{2}$/.test(api.today()));
   const p = fresh({ ever: ['straw'] });
   // Done today, so the path should move on rather than point at it again.
   p.done = { straw: 20 };
-  eq('the path skips what is already done today', api.nextStep(), 'yawn');
+  eq('the path skips what is already done today', api.nextStep(), 'onset');
+}
+{
+  const p = fresh({ ever: ROUTINE.slice() });
+  p.done = { straw: 20 };
+  eq('a supplied focus plan controls the next pointer',
+    api.nextStep(['straw', 'endings', 'passage']), 'endings');
+  p.done.endings = 18;
+  p.done.passage = 17;
+  eq('a completed focus plan has no next step',
+    api.nextStep(['straw', 'endings', 'passage']), null);
 }
 {
   const p = fresh({ ever: ROUTINE.slice() });

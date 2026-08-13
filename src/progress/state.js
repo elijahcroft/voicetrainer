@@ -19,12 +19,12 @@ import { base } from '../store/baseline.js';
 
 export var PROGRESS_KEY = 'voice-trainer-progress-v1';
 
-// The eight drills, in the order the routine intends: semi-occluded warm-up
-// before any pitch work, connected speech last.
-export var ROUTINE = ['straw', 'yawn', 'ng', 'vowels', 'glide', 'endings', 'passage', 'free'];
+// The ten drills, in the order the routine intends: low-strain coordination
+// first, isolated control next, and connected speech last.
+export var ROUTINE = ['straw', 'onset', 'yawn', 'ng', 'ladder', 'vowels', 'glide', 'endings', 'passage', 'free'];
 
-// Five of the eight is roughly ten minutes. A goal you can hit on a bad day
-// is the one that survives; asking for all eight would break the streak on
+// Five of the ten is roughly ten minutes. A goal you can hit on a bad day
+// is the one that survives; asking for all ten would break the streak on
 // exactly the days that keeping it matters.
 export var DAILY_GOAL = 5;
 
@@ -82,7 +82,7 @@ export function rollDay() {
   saveProgress();
 }
 
-// Only the eight drills count toward a day. Calibration is deliberately not
+// Only the ten drills count toward a day. Calibration is deliberately not
 // among them: it is the setup the targets come from, not practice, and
 // letting it fill a slot would mean a day's goal could be met without
 // actually using your voice for anything.
@@ -96,15 +96,16 @@ export function stepDone(id) { return Object.prototype.hasOwnProperty.call(progr
 // a suggestion the path still points along, not a wall.
 export function stepLocked() { return false; }
 
-// The next thing to do: the first routine step not yet finished today and not
-// locked. It is the only step the path actively points at, and it is what the
-// app opens on, so coming back answers "what now" without you having to
-// remember where you stopped. Null once the whole routine is done for the day.
-export function nextStep() {
+// The next thing to do: the first step in the supplied daily plan not yet
+// finished today. With no plan supplied this retains the full-routine behavior
+// for callers and tests that need it. Nothing is locked; the order only decides
+// where the path points and what the app opens on. Null once that plan is done.
+export function nextStep(order) {
   if (base.habitualF0 == null) return null;
   rollDay();
-  for (var i = 0; i < ROUTINE.length; i++) {
-    if (!stepDone(ROUTINE[i]) && !stepLocked(ROUTINE[i])) return ROUTINE[i];
+  order = order && order.length ? order : ROUTINE;
+  for (var i = 0; i < order.length; i++) {
+    if (!stepDone(order[i]) && !stepLocked(order[i])) return order[i];
   }
   return null;
 }
