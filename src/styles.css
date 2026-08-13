@@ -379,6 +379,14 @@ th { padding-bottom: 6px; }
 td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ok { color: var(--r-peak); } .no { color: var(--r-high); }
 .hint { font-size: 12.5px; color: var(--dim); margin-top: 10px; }
+
+/* Progress-chart key. The swatches name the colours drawn into the canvas,
+   which no stylesheet can reach, so their fills come from constants.js. */
+#progLegend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
+.lg { display: inline-flex; align-items: center; gap: 6px; }
+.lg i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.lg i.ring { width: 10px; height: 10px; background: none;
+             border: 2px solid rgba(212,59,122,.75); }
 /* A secondary control that belongs to a line of text rather than to an action
    row — `.row` buttons go full width on a phone, which is right for starting a
    take and much too loud for swapping a prompt. */

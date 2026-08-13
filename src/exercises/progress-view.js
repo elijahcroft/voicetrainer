@@ -1,5 +1,6 @@
 import { RAMP, RESONANCE_GOAL } from '../constants.js';
 import { openExercise } from './registry.js';
+import { MIN_TREND_DAYS, dailyMedians, trend } from '../progress/trend.js';
 import { base } from '../store/baseline.js';
 import { clearHistory, history } from '../store/history.js';
 import { pitchTarget } from '../targets.js';
@@ -26,6 +27,7 @@ function progressMetrics() {
 
 var KIND_LABEL = { calibration: 'Calibration', passage: 'Passage', free: 'Free speech' };
 var KIND_COLOR = { calibration: RAMP.quiet, passage: RAMP.signal, free: RAMP.high };
+var DAY_MS = 86400000;
 
 export function buildProgress() {
   var metrics = progressMetrics().filter(function (m) {
@@ -51,9 +53,10 @@ export function buildProgress() {
   var html =
     '<div class="card">' +
       '<h3>Progress</h3>' +
-      '<p class="why">Every scored take, oldest first. Practice moves slowly and unevenly — a single ' +
-      'take says almost nothing, and the line across a few weeks says everything. Nothing here is ' +
-      'uploaded; only the medians and the date are kept, in this browser.</p>' +
+      '<p class="why">Every scored take, on a real time axis: a week between two takes looks like a ' +
+      'week. Practice moves slowly and unevenly — a single take says almost nothing, so the line ' +
+      'joins one median per day rather than every take. Nothing here is uploaded; only the medians ' +
+      'and the date are kept, in this browser.</p>' +
       '<div class="row" id="metricRow" style="margin-top:0">' +
         metrics.map(function (m) {
           return '<button data-metric="' + m.id + '"' + (m.id === sel ? ' class="primary"' : '') +
@@ -61,7 +64,18 @@ export function buildProgress() {
         }).join('') +
       '</div>' +
       '<canvas id="progCanvas" class="trace" style="height:230px;margin-top:14px" role="img" ' +
-        'aria-label="Scored takes over time"></canvas>' +
+        'aria-label="Scored takes on a time axis, with the median of each day joined by a line">' +
+      '</canvas>' +
+      // Two mark types now share the chart, so both have to be named: the
+      // dots are takes and the line is days, and without this the reader has
+      // no way to know that six dots can sit under one point on the line.
+      '<div class="hint" id="progLegend">' +
+        Object.keys(KIND_LABEL).map(function (kind) {
+          return '<span class="lg"><i style="background:' + KIND_COLOR[kind] + '"></i>' +
+            KIND_LABEL[kind] + '</span>';
+        }).join('') +
+        '<span class="lg"><i class="ring"></i>median of that day</span>' +
+      '</div>' +
       '<div id="progSummary" class="hint"></div>' +
     '</div>' +
     '<div class="card">' +
@@ -82,6 +96,7 @@ export function buildProgress() {
   function draw() {
     var m = metrics.filter(function (x) { return x.id === sel; })[0];
     var pts = series(m);
+    var days = dailyMedians(pts, m.id);
     var r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
     if (cv.width !== Math.round(r.width * dpr)) {
       cv.width = r.width * dpr; cv.height = r.height * dpr;
@@ -108,10 +123,13 @@ export function buildProgress() {
     lo -= pad; hi += pad;
 
     var padL = 46, padR = 12, padT = 12, padB = 22;
-    function x(i) {
-      return pts.length === 1 ? padL + (w - padL - padR) / 2
-        : padL + i / (pts.length - 1) * (w - padL - padR);
-    }
+    // Real time, not take number. Less than a day of history is widened to a
+    // day and centred, which keeps this to one code path and stops a single
+    // session's takes from being stretched across the full width as though
+    // they were weeks apart.
+    var t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+    var span = Math.max(t1 - t0, DAY_MS), tLo = (t0 + t1) / 2 - span / 2;
+    function x(t) { return padL + (t - tLo) / span * (w - padL - padR); }
     function y(v) { return padT + (1 - (v - lo) / (hi - lo)) * (h - padT - padB); }
 
     // y axis
@@ -133,46 +151,68 @@ export function buildProgress() {
       g.fillText(lbl, w - padR - g.measureText(lbl).width, yr - 5);
     }
 
+    // The line is the days. A day holding one take and a day holding six
+    // retries are one point each, which is the whole reason for drawing it.
     g.strokeStyle = 'rgba(212,59,122,.75)'; g.lineWidth = 2;
     g.beginPath();
-    pts.forEach(function (p, i) {
-      var xx = x(i), yy = y(p[m.id]);
+    days.forEach(function (d, i) {
+      var xx = x(d.t), yy = y(d.value);
       if (i) g.lineTo(xx, yy); else g.moveTo(xx, yy);
     });
     g.stroke();
 
-    pts.forEach(function (p, i) {
-      g.fillStyle = KIND_COLOR[p.kind] || RAMP.signal;
-      g.beginPath(); g.arc(x(i), y(p[m.id]), 3.5, 0, Math.PI * 2); g.fill();
+    // Rings, so a day of one take still shows that take's own colour inside.
+    days.forEach(function (d) {
+      g.beginPath(); g.arc(x(d.t), y(d.value), 4.5, 0, Math.PI * 2); g.stroke();
     });
 
-    g.fillStyle = 'rgba(143,151,173,.75)';
-    g.fillText(shortDate(pts[0].t), padL, h - 6);
-    if (pts.length > 1) {
-      var last = shortDate(pts[pts.length - 1].t);
-      g.fillText(last, w - padR - g.measureText(last).width, h - 6);
-    }
+    // The takes themselves stay on the chart — the spread of a day is worth
+    // seeing — but as the quieter mark, since the line is what to read.
+    g.globalAlpha = 0.55;
+    pts.forEach(function (p) {
+      g.fillStyle = KIND_COLOR[p.kind] || RAMP.signal;
+      g.beginPath(); g.arc(x(p.t), y(p[m.id]), 2.5, 0, Math.PI * 2); g.fill();
+    });
+    g.globalAlpha = 1;
 
-    summarise(m, pts);
+    // Dates sit under the take they name rather than at the edges, which the
+    // widened single-day span would otherwise make untrue.
+    g.fillStyle = 'rgba(143,151,173,.75)';
+    function stamp(t) {
+      var text = dayLabel(t), tw = g.measureText(text).width;
+      g.fillText(text, Math.min(Math.max(x(t) - tw / 2, padL), w - padR - tw), h - 6);
+    }
+    if (x(t1) - x(t0) >= 90) stamp(t0);
+    stamp(t1);
+
+    summarise(m, pts, days);
   }
 
-  // Change since the first take, stated in the direction that is actually an
-  // improvement for the metric — "down 11 Hz" is progress, "down 0.4 cm" is not.
-  function summarise(m, pts) {
+  // Early days against late days, stated in the direction that is actually an
+  // improvement for the metric — "down 11 Hz" is progress, "down 0.4 cm" is
+  // not. This used to be the first take against the last one, which is the
+  // noisiest comparison available: the two readings most exposed to a bad
+  // night's sleep decided what the whole screen said.
+  function summarise(m, pts, days) {
     var el = document.getElementById('progSummary');
-    if (pts.length < 2) {
-      el.innerHTML = 'One take so far. A second one gives you a line.';
+    var tail = m.passageOnly
+      ? ' Free-speech takes are left out, since resonance only compares on the same text.' : '';
+    var plural = function (n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); };
+    var t = trend(days);
+    if (!t) {
+      el.innerHTML = plural(pts.length, 'take') + ' across ' + plural(days.length, 'day') +
+        '. A trend needs ' + MIN_TREND_DAYS + ' measured days, so that two independent days ' +
+        'stand on each side of the comparison.' + tail;
       return;
     }
-    var first = pts[0][m.id], last = pts[pts.length - 1][m.id];
-    var d = last - first;
-    var better = m.lower ? d < 0 : d > 0;
-    var word = Math.abs(d) < Math.pow(10, -m.dp) / 2 ? 'unchanged' :
-      (better ? 'toward your goal' : 'away from your goal');
-    el.innerHTML = pts.length + ' takes since ' + shortDate(pts[0].t) + '. ' +
-      m.label + ' ' + (d >= 0 ? '+' : '') + d.toFixed(m.dp) + m.unit +
-      ' <span class="' + (word === 'unchanged' ? '' : better ? 'ok' : 'no') + '">' + word + '</span>' +
-      (m.passageOnly ? ' — free-speech takes are left out, since resonance only compares on the same text.' : '');
+    var flat = Math.abs(t.delta) < Math.pow(10, -m.dp) / 2;
+    var better = m.lower ? t.delta < 0 : t.delta > 0;
+    var word = flat ? 'unchanged' : better ? 'toward your goal' : 'away from your goal';
+    el.innerHTML = 'Across ' + plural(t.days, 'measured day') + ', ' + m.label.toLowerCase() +
+      ' went from ' + t.from.toFixed(m.dp) + m.unit + ' to ' + t.to.toFixed(m.dp) + m.unit +
+      ' (' + (t.delta >= 0 ? '+' : '') + t.delta.toFixed(m.dp) + m.unit + ') ' +
+      '<span class="' + (flat ? '' : better ? 'ok' : 'no') + '">' + word + '</span>' +
+      '. Each end is the median of ' + t.span + ' days.' + tail;
   }
 
   return {
@@ -233,4 +273,10 @@ function shortDate(ms) {
   var d = new Date(ms);
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
     d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+// The chart axis spans weeks, where the time of day is noise. The take table
+// still wants it, since two takes on one day are two rows there.
+function dayLabel(ms) {
+  return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
